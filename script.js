@@ -1,10 +1,11 @@
 /**
- * Main Application Script
+ * Main Application Script - JSONP Version for Google Apps Script
  */
 
 // Application State
 let currentCustomer = null;
 let autocompleteResults = [];
+let gasClient = null;
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -16,34 +17,45 @@ function initApp() {
     console.log('App initialized');
     
     // Initialize GAS client
-    const gasClient = initGASClient();
+    gasClient = initGASClient();
     if (!gasClient) {
         UIUtils.showToast('Please configure GAS URL in config.js', 'error');
         return;
     }
     
     setupEventListeners();
+    setupDefaultDates();
     
     // Test connection on startup
-    testConnectionOnStartup();
+    setTimeout(() => {
+        testConnectionOnStartup();
+    }, 1000);
 }
 
+// Test connection on startup
 async function testConnectionOnStartup() {
-    const gas = getGASClient();
-    if (!gas) return;
+    if (!gasClient) return;
     
     try {
-        const result = await gas.testConnection();
+        UIUtils.showLoading('Testing connection to GAS...');
+        const result = await gasClient.testConnection();
+        
         if (result.success) {
-            console.log('GAS connection test successful');
+            console.log('GAS connection test successful:', result.message);
+            UIUtils.showToast('Connected to Google Apps Script!', 'success');
         } else {
             console.warn('GAS connection test failed:', result.message);
+            UIUtils.showToast(`Connection warning: ${result.message}`, 'warning');
         }
     } catch (error) {
         console.error('Connection test error:', error);
+        UIUtils.showToast(`Connection error: ${error.message}`, 'error');
+    } finally {
+        UIUtils.hideLoading();
     }
 }
 
+// Setup event listeners
 function setupEventListeners() {
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
@@ -64,13 +76,82 @@ function setupEventListeners() {
         });
     }
 
+    // Search type change
     const radios = document.getElementsByName('searchType');
     for (let radio of radios) {
         radio.addEventListener('change', function() {
             const dd = document.getElementById('autocompleteDropdown');
             if (dd) dd.classList.add('autocomplete-hidden');
+            updateSearchPlaceholder();
         });
     }
+    
+    // Click outside autocomplete
+    document.addEventListener('click', function(e) {
+        const dropdown = document.getElementById('autocompleteDropdown');
+        const searchInput = document.getElementById('searchInput');
+        
+        if (dropdown && !dropdown.contains(e.target) && e.target !== searchInput) {
+            dropdown.classList.add('autocomplete-hidden');
+        }
+    });
+}
+
+// Update search placeholder based on selected type
+function updateSearchPlaceholder() {
+    const input = document.getElementById('searchInput');
+    if (!input) return;
+    
+    const type = getSelectedSearchType();
+    let placeholder = '';
+    
+    switch(type) {
+        case 'accountName':
+            placeholder = 'Enter account name...';
+            break;
+        case 'accountNumber':
+            placeholder = 'Enter account number...';
+            break;
+        case 'customerId':
+            placeholder = 'Enter customer ID...';
+            break;
+        default:
+            placeholder = 'Enter value...';
+    }
+    
+    input.placeholder = placeholder;
+}
+
+// Setup default dates for modal
+function setupDefaultDates() {
+    // Set max date to today for date inputs
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Set max for modal date inputs when modal is loaded
+    const checkModalDates = () => {
+        const dateFrom = document.getElementById('modalPeriodFromInput');
+        const dateTo = document.getElementById('modalPeriodToInput');
+        
+        if (dateFrom) {
+            dateFrom.max = today;
+            if (!dateFrom.value) {
+                // Set default to first day of current month
+                const firstDay = new Date();
+                firstDay.setDate(1);
+                dateFrom.valueAsDate = firstDay;
+            }
+        }
+        
+        if (dateTo) {
+            dateTo.max = today;
+            if (!dateTo.value) {
+                dateTo.valueAsDate = new Date();
+            }
+        }
+    };
+    
+    // Check periodically for modal
+    setInterval(checkModalDates, 1000);
 }
 
 // Get selected search type
@@ -84,7 +165,7 @@ function getSelectedSearchType() {
     return 'accountName';
 }
 
-// Search function
+// Main search function
 async function search() {
     const type = getSelectedSearchType();
     const value = document.getElementById('searchInput').value.trim();
@@ -100,13 +181,7 @@ async function search() {
     UIUtils.showLoading('Searching customer...');
     
     try {
-        const gas = getGASClient();
-        if (!gas) {
-            UIUtils.showToast('GAS client not configured. Check config.js', 'error');
-            return;
-        }
-        
-        const result = await gas.searchCustomer(type, value);
+        const result = await gasClient.searchCustomer(type, value);
         
         if (result) {
             displayCustomer(result);
@@ -120,16 +195,18 @@ async function search() {
         console.error('Search error:', error);
         UIUtils.showToast(`Search failed: ${error.message}`, 'error');
         
-        // More specific error handling
-        if (error.message.includes('Access denied') || error.message.includes('Unauthorized')) {
-            UIUtils.showToast('Please redeploy GAS with "Anyone" access permission', 'error');
+        // Specific error handling
+        if (error.message.includes('CORS') || error.message.includes('Access-Control')) {
+            UIUtils.showToast('CORS error. Please check GAS deployment permissions.', 'error');
+        } else if (error.message.includes('timeout')) {
+            UIUtils.showToast('Request timeout. Please try again.', 'warning');
         }
     } finally {
         UIUtils.hideLoading();
     }
 }
 
-// Display customer
+// Display customer details
 function displayCustomer(customer) {
     document.getElementById('accountName').value = customer.accountName || '';
     document.getElementById('accountNumber').value = customer.accountNumber || '';
@@ -167,10 +244,7 @@ async function handleSearchInput() {
     }
     
     try {
-        const gas = getGASClient();
-        if (!gas) return;
-        
-        const results = await gas.autocompleteNames(value);
+        const results = await gasClient.autocompleteNames(value);
         autocompleteResults = results || [];
         
         if (dropdown) {
@@ -214,17 +288,17 @@ function selectAutocomplete(idx) {
 
 // Open statement modal
 function openCustomerStatementModal(data) {
-    if (!currentCustomer && !data) {
-        UIUtils.showToast('Please select a customer first', 'warning');
-        return;
-    }
-
     if (data) {
         if (!document.getElementById('customerStatementModal')) {
             loadCustomerStatementModal(data);
         } else {
             fillAndShowCustomerStatementModal(data);
         }
+        return;
+    }
+
+    if (!currentCustomer) {
+        UIUtils.showToast('Please select a customer first', 'warning');
         return;
     }
 
@@ -238,28 +312,24 @@ function openCustomerStatementModal(data) {
 // Load modal HTML
 async function loadCustomerStatementModal(data) {
     try {
-        const gas = getGASClient();
-        if (gas) {
-            // Try to get modal HTML from GAS
-            const html = await gas.request('getModalHtml');
-            if (html && typeof html === 'string') {
-                document.getElementById('modalContainer').innerHTML = html;
-            }
-        }
-    } catch (error) {
-        console.log('Could not load modal from GAS:', error);
-        // Use default modal
+        // Use default modal HTML (simpler approach)
         document.getElementById('modalContainer').innerHTML = getDefaultModalHTML();
-    }
-    
-    if (data) {
-        fillAndShowCustomerStatementModal(data);
-    } else {
-        fillAndShowCustomerStatementModal();
+        
+        // Initialize modal dates
+        setTimeout(() => {
+            if (data) {
+                fillAndShowCustomerStatementModal(data);
+            } else {
+                fillAndShowCustomerStatementModal();
+            }
+        }, 100);
+    } catch (error) {
+        console.error('Error loading modal:', error);
+        UIUtils.showToast('Error loading statement modal', 'error');
     }
 }
 
-// Default modal HTML (fallback)
+// Default modal HTML
 function getDefaultModalHTML() {
     return `
     <div id="customerStatementModal" class="modal-overlay" style="display:none;">
@@ -325,19 +395,24 @@ function fillAndShowCustomerStatementModal(data) {
     if (modalName) modalName.innerText = name;
     if (modalNumber) modalNumber.value = number;
 
-    // Reset period/date and table
+    // Reset dates and table
     const fromInput = document.getElementById('modalPeriodFromInput');
     const toInput = document.getElementById('modalPeriodToInput');
     const tbody = document.getElementById('statementTableBody');
     
     if (fromInput) {
-        fromInput.value = '';
+        // Set default to first day of current month
+        const firstDay = new Date();
+        firstDay.setDate(1);
+        fromInput.valueAsDate = firstDay;
         fromInput.max = new Date().toISOString().split('T')[0];
     }
+    
     if (toInput) {
-        toInput.value = '';
+        toInput.valueAsDate = new Date();
         toInput.max = new Date().toISOString().split('T')[0];
     }
+    
     if (tbody) tbody.innerHTML = '';
     
     const modal = document.getElementById('customerStatementModal');
@@ -384,12 +459,7 @@ async function generateStatement() {
     UIUtils.showLoading('Generating statement...');
     
     try {
-        const gas = getGASClient();
-        if (!gas) {
-            throw new Error('GAS client not configured');
-        }
-        
-        const results = await gas.generateStatement(accountNumber, dateFrom, dateTo);
+        const results = await gasClient.generateStatement(accountNumber, dateFrom, dateTo);
         displayStatementResults(results);
         UIUtils.showToast('Statement generated successfully!', 'success');
     } catch (error) {
@@ -463,7 +533,7 @@ function displayStatementResults(transactions) {
             
             row.innerHTML = `
                 <td class="date">${txn.date}</td>
-                <td class="description">${txn.desc || ''}</td>
+                <td class="description">${UIUtils.escapeHtml(txn.desc || '')}</td>
                 <td class="debit">${txn.type === 'DEBIT' ? UIUtils.formatCurrency(amount) : ''}</td>
                 <td class="credit">${txn.type === 'CREDIT' ? UIUtils.formatCurrency(amount) : ''}</td>
                 <td class="balance">${UIUtils.formatCurrency(txn.balance)}</td>
@@ -477,10 +547,10 @@ function displayStatementResults(transactions) {
             totalRow.className = 'total-row';
             totalRow.innerHTML = `
                 <td></td>
-                <td>TOTAL</td>
-                <td class="debit">${UIUtils.formatCurrency(totalDebits)}</td>
-                <td class="credit">${UIUtils.formatCurrency(totalCredits)}</td>
-                <td class="balance">${UIUtils.formatCurrency(closingBalance)}</td>
+                <td><strong>TOTAL</strong></td>
+                <td class="debit"><strong>${UIUtils.formatCurrency(totalDebits)}</strong></td>
+                <td class="credit"><strong>${UIUtils.formatCurrency(totalCredits)}</strong></td>
+                <td class="balance"><strong>${UIUtils.formatCurrency(closingBalance)}</strong></td>
             `;
             tbody.appendChild(totalRow);
         }
@@ -511,6 +581,110 @@ function handleStatementError(error) {
     `;
 }
 
+// Test connection manually
+async function testConnection() {
+    if (!gasClient) {
+        UIUtils.showToast('GAS client not initialized', 'error');
+        return;
+    }
+    
+    UIUtils.showLoading('Testing connection...');
+    
+    try {
+        const result = await gasClient.testConnection();
+        
+        if (result.success) {
+            UIUtils.showToast('Connection successful! ' + result.message, 'success');
+        } else {
+            UIUtils.showToast('Connection failed: ' + result.message, 'error');
+        }
+    } catch (error) {
+        UIUtils.showToast('Connection error: ' + error.message, 'error');
+    } finally {
+        UIUtils.hideLoading();
+    }
+}
+
+// Refresh customer data
+async function refreshCustomerData() {
+    if (!currentCustomer || !currentCustomer.accountNumber) {
+        UIUtils.showToast('No customer selected', 'warning');
+        return;
+    }
+    
+    UIUtils.showLoading('Refreshing data...');
+    
+    try {
+        const result = await gasClient.searchCustomer('accountNumber', currentCustomer.accountNumber);
+        
+        if (result) {
+            displayCustomer(result);
+            currentCustomer = result;
+            UIUtils.showToast('Data refreshed successfully', 'success');
+        } else {
+            UIUtils.showToast('Customer no longer exists', 'warning');
+            clearAll();
+        }
+    } catch (error) {
+        UIUtils.showToast('Refresh failed: ' + error.message, 'error');
+    } finally {
+        UIUtils.hideLoading();
+    }
+}
+
+// Export statement to CSV
+function exportToCSV() {
+    const tbody = document.getElementById('statementTableBody');
+    if (!tbody) {
+        UIUtils.showToast('No statement data to export', 'warning');
+        return;
+    }
+    
+    const rows = tbody.querySelectorAll('tr');
+    if (rows.length === 0) {
+        UIUtils.showToast('No statement data to export', 'warning');
+        return;
+    }
+    
+    let csv = 'Date,Description,Type,Debit,Credit,Balance\n';
+    
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        if (cells.length >= 5) {
+            const date = cells[0].textContent || '';
+            const desc = '"' + (cells[1].textContent || '').replace(/"/g, '""') + '"';
+            const debit = cells[2].textContent || '';
+            const credit = cells[3].textContent || '';
+            const balance = cells[4].textContent || '';
+            
+            // Determine type based on which column has value
+            const type = debit ? 'DEBIT' : credit ? 'CREDIT' : 'BALANCE';
+            const amount = debit || credit || '';
+            
+            csv += `${date},${desc},${type},${amount},${balance}\n`;
+        }
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    
+    link.setAttribute('href', url);
+    link.setAttribute('download', `statement_${currentCustomer?.accountNumber || 'unknown'}_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.style.visibility = 'hidden';
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    UIUtils.showToast('CSV exported successfully', 'success');
+}
+
+// Print statement
+function printStatement() {
+    window.print();
+}
+
 // Debounce function
 function debounce(func, wait) {
     let timeout;
@@ -531,3 +705,10 @@ window.clearAll = clearAll;
 window.openCustomerStatementModal = openCustomerStatementModal;
 window.closeCustomerStatementModal = closeCustomerStatementModal;
 window.generateStatement = generateStatement;
+window.testConnection = testConnection;
+window.refreshCustomerData = refreshCustomerData;
+window.exportToCSV = exportToCSV;
+window.printStatement = printStatement;
+
+// Initialize the app
+setTimeout(initApp, 100);
