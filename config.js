@@ -2,7 +2,7 @@
 const GAS_CONFIG = {
     // Replace with your deployed GAS web app URL
     // Format: https://script.google.com/macros/s/SCRIPT_ID/exec
-    BASE_URL: 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec',
+    BASE_URL: 'https://script.google.com/macros/s/AKfycbzmjPEYq5F9FvV9mFPy91ahKtkkIIsnRoPctEZW7yfeQozYM5JjcVVMBfZOI6GX1VXrHQ/exec',
     
     // GAS endpoints (these match the doPost/doGet functions in GAS)
     ENDPOINTS: {
