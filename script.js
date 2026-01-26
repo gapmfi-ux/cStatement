@@ -8,12 +8,40 @@ let autocompleteResults = [];
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('DOM loaded, initializing app...');
     initApp();
 });
 
 function initApp() {
     console.log('App initialized');
+    
+    // Initialize GAS client
+    const gasClient = initGASClient();
+    if (!gasClient) {
+        UIUtils.showToast('Please configure GAS URL in config.js', 'error');
+        return;
+    }
+    
     setupEventListeners();
+    
+    // Test connection on startup
+    testConnectionOnStartup();
+}
+
+async function testConnectionOnStartup() {
+    const gas = getGASClient();
+    if (!gas) return;
+    
+    try {
+        const result = await gas.testConnection();
+        if (result.success) {
+            console.log('GAS connection test successful');
+        } else {
+            console.warn('GAS connection test failed:', result.message);
+        }
+    } catch (error) {
+        console.error('Connection test error:', error);
+    }
 }
 
 function setupEventListeners() {
@@ -26,6 +54,13 @@ function setupEventListeners() {
                 const dd = document.getElementById('autocompleteDropdown');
                 if (dd) dd.classList.add('autocomplete-hidden');
             }, 200);
+        });
+        
+        // Enter key support
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                search();
+            }
         });
     }
 
@@ -55,19 +90,19 @@ async function search() {
     const value = document.getElementById('searchInput').value.trim();
     
     if (!value) {
-        alert('Please enter a value to search.');
+        UIUtils.showToast('Please enter a value to search.', 'warning');
         return;
     }
     
     const dd = document.getElementById('autocompleteDropdown');
     if (dd) dd.classList.add('autocomplete-hidden');
     
-    UIUtils.showLoading();
+    UIUtils.showLoading('Searching customer...');
     
     try {
         const gas = getGASClient();
         if (!gas) {
-            UIUtils.showToast('GAS client not configured', 'error');
+            UIUtils.showToast('GAS client not configured. Check config.js', 'error');
             return;
         }
         
@@ -76,13 +111,19 @@ async function search() {
         if (result) {
             displayCustomer(result);
             currentCustomer = result;
+            UIUtils.showToast('Customer found successfully!', 'success');
         } else {
             clearInputs();
-            alert('No matching record found.');
+            UIUtils.showToast('No matching record found.', 'warning');
         }
     } catch (error) {
         console.error('Search error:', error);
-        alert('Error searching: ' + (error.message || error));
+        UIUtils.showToast(`Search failed: ${error.message}`, 'error');
+        
+        // More specific error handling
+        if (error.message.includes('Access denied') || error.message.includes('Unauthorized')) {
+            UIUtils.showToast('Please redeploy GAS with "Anyone" access permission', 'error');
+        }
     } finally {
         UIUtils.hideLoading();
     }
@@ -111,6 +152,7 @@ function clearAll() {
     const dd = document.getElementById('autocompleteDropdown');
     if (dd) dd.classList.add('autocomplete-hidden');
     currentCustomer = null;
+    UIUtils.showToast('All fields cleared', 'info');
 }
 
 // Handle search input for autocomplete
@@ -167,10 +209,16 @@ function selectAutocomplete(idx) {
     if (dd) dd.classList.add('autocomplete-hidden');
     displayCustomer(selected);
     currentCustomer = selected;
+    UIUtils.showToast('Customer selected from suggestions', 'success');
 }
 
 // Open statement modal
 function openCustomerStatementModal(data) {
+    if (!currentCustomer && !data) {
+        UIUtils.showToast('Please select a customer first', 'warning');
+        return;
+    }
+
     if (data) {
         if (!document.getElementById('customerStatementModal')) {
             loadCustomerStatementModal(data);
@@ -192,11 +240,16 @@ async function loadCustomerStatementModal(data) {
     try {
         const gas = getGASClient();
         if (gas) {
-            const html = await gas.request('getModalHtml', 'GET');
-            document.getElementById('modalContainer').innerHTML = html;
+            // Try to get modal HTML from GAS
+            const html = await gas.request('getModalHtml');
+            if (html && typeof html === 'string') {
+                document.getElementById('modalContainer').innerHTML = html;
+            }
         }
     } catch (error) {
         console.log('Could not load modal from GAS:', error);
+        // Use default modal
+        document.getElementById('modalContainer').innerHTML = getDefaultModalHTML();
     }
     
     if (data) {
@@ -206,32 +259,85 @@ async function loadCustomerStatementModal(data) {
     }
 }
 
+// Default modal HTML (fallback)
+function getDefaultModalHTML() {
+    return `
+    <div id="customerStatementModal" class="modal-overlay" style="display:none;">
+      <div class="modal-content">
+        <button class="close-btn" onclick="closeCustomerStatementModal()" aria-label="Close">&times;</button>
+        <div class="statement-container">
+          <div class="statement-header">
+            <h2>CUSTOMER STATEMENT</h2>
+            <div class="statement-info">
+              <div>
+                <span class="label">ACCOUNT NAME</span>:
+                <span id="modalCustomerName"></span>
+              </div>
+              <div>
+                <span class="label">ACCOUNT NUMBER</span>:
+                <input id="modalAccountNumber" type="text" readonly class="modal-account-input">
+              </div>
+              <div class="period-row-box">
+                <div class="period-row-inner">
+                  <span class="label">PERIOD:</span>
+                  <span class="label">FROM</span>
+                  <input type="date" id="modalPeriodFromInput" value="" class="date-input">
+                  <span class="label">TO</span>
+                  <input type="date" id="modalPeriodToInput" value="" class="date-input">
+                  <button class="generate-btn" onclick="generateStatement();return false;">GENERATE</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <table class="statement-table">
+            <thead>
+              <tr>
+                <th>DATE</th>
+                <th>DESCRIPTION</th>
+                <th>DEBIT</th>
+                <th>CREDIT</th>
+                <th>BALANCE</th>
+              </tr>
+            </thead>
+            <tbody id="statementTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    `;
+}
+
 // Fill and show modal
 function fillAndShowCustomerStatementModal(data) {
+    let name, number;
+    
     if (data) {
-        const modalName = document.getElementById('modalCustomerName');
-        const modalNumber = document.getElementById('modalAccountNumber');
-        
-        if (modalName) modalName.innerText = data.accountName || '';
-        if (modalNumber) modalNumber.value = data.accountNumber || '';
+        name = data.accountName || '';
+        number = data.accountNumber || '';
     } else {
-        var name = document.getElementById('accountName').value || '';
-        var number = document.getElementById('accountNumber').value || '';
-
-        const modalName = document.getElementById('modalCustomerName');
-        const modalNumber = document.getElementById('modalAccountNumber');
-        
-        if (modalName) modalName.innerText = name;
-        if (modalNumber) modalNumber.value = number;
+        name = document.getElementById('accountName').value || '';
+        number = document.getElementById('accountNumber').value || '';
     }
+
+    const modalName = document.getElementById('modalCustomerName');
+    const modalNumber = document.getElementById('modalAccountNumber');
+    
+    if (modalName) modalName.innerText = name;
+    if (modalNumber) modalNumber.value = number;
 
     // Reset period/date and table
     const fromInput = document.getElementById('modalPeriodFromInput');
     const toInput = document.getElementById('modalPeriodToInput');
     const tbody = document.getElementById('statementTableBody');
     
-    if (fromInput) fromInput.value = '';
-    if (toInput) toInput.value = '';
+    if (fromInput) {
+        fromInput.value = '';
+        fromInput.max = new Date().toISOString().split('T')[0];
+    }
+    if (toInput) {
+        toInput.value = '';
+        toInput.max = new Date().toISOString().split('T')[0];
+    }
     if (tbody) tbody.innerHTML = '';
     
     const modal = document.getElementById('customerStatementModal');
@@ -250,14 +356,14 @@ async function generateStatement() {
     const accountNumber = accountNumberInput ? accountNumberInput.value.trim() : '';
     
     if (!accountNumber) {
-        alert('Account number is required!');
+        UIUtils.showToast('Account number is required!', 'warning');
         if (accountNumberInput) accountNumberInput.focus();
         return;
     }
 
     const accountNumberRegex = /^\d{6,13}$/;
     if (!accountNumberRegex.test(accountNumber)) {
-        alert('Please enter a valid account number (6-13 digits)');
+        UIUtils.showToast('Please enter a valid account number (6-13 digits)', 'warning');
         if (accountNumberInput) accountNumberInput.focus();
         return;
     }
@@ -266,7 +372,7 @@ async function generateStatement() {
     const dateTo = document.getElementById('modalPeriodToInput')?.value;
     
     if (dateFrom && dateTo && dateFrom > dateTo) {
-        alert('From date cannot be after To date.');
+        UIUtils.showToast('From date cannot be after To date.', 'warning');
         return;
     }
 
@@ -275,7 +381,7 @@ async function generateStatement() {
         tbody.innerHTML = '<tr><td colspan="5" class="loading-message">Loading transactions...</td></tr>';
     }
 
-    UIUtils.showLoading();
+    UIUtils.showLoading('Generating statement...');
     
     try {
         const gas = getGASClient();
@@ -285,9 +391,11 @@ async function generateStatement() {
         
         const results = await gas.generateStatement(accountNumber, dateFrom, dateTo);
         displayStatementResults(results);
+        UIUtils.showToast('Statement generated successfully!', 'success');
     } catch (error) {
         console.error('Statement Error:', error);
         handleStatementError(error);
+        UIUtils.showToast(`Statement generation failed: ${error.message}`, 'error');
     } finally {
         UIUtils.hideLoading();
     }
