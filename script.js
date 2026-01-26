@@ -1,194 +1,150 @@
-// API Service
-class ApiService {
-    constructor(baseUrl) {
-        this.baseUrl = baseUrl;
-    }
+/**
+ * Main Application Script for Google Apps Script Backend
+ */
+ 
+// Application State
+let appState = {
+    currentCustomer: null,
+    currentStatement: null,
+    connectionStatus: 'disconnected',
+    isLoading: false,
+    autocompleteResults: [],
+    lastUpdated: null
+};
 
-    async request(endpoint, options = {}) {
-        const url = `${this.baseUrl}${endpoint}`;
-        const defaultOptions = {
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                ...options.headers
-            }
-        };
-
-        try {
-            const response = await fetch(url, { ...defaultOptions, ...options });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const data = await response.json();
-            return data;
-        } catch (error) {
-            console.error('API request failed:', error);
-            throw error;
-        }
-    }
-
-    async searchCustomer(type, value) {
-        return this.request(API_CONFIG.ENDPOINTS.SEARCH, {
-            method: 'POST',
-            body: JSON.stringify({ type, value })
-        });
-    }
-
-    async autocompleteNames(value) {
-        return this.request(API_CONFIG.ENDPOINTS.AUTOCOMPLETE, {
-            method: 'POST',
-            body: JSON.stringify({ value })
-        });
-    }
-
-    async generateStatement(accountNumber, dateFrom, dateTo) {
-        return this.request(API_CONFIG.ENDPOINTS.STATEMENT, {
-            method: 'POST',
-            body: JSON.stringify({ accountNumber, dateFrom, dateTo })
-        });
-    }
-}
-
-// Initialize API service
-const apiService = new ApiService(API_CONFIG.BASE_URL);
-
-// State Management
-let currentCustomer = null;
-let autocompleteResults = [];
-
-// UI Utility Functions
-class UIUtils {
-    static showLoading() {
-        document.getElementById('loadingSpinner').style.display = 'flex';
-        document.body.style.overflow = 'hidden';
-    }
-
-    static hideLoading() {
-        document.getElementById('loadingSpinner').style.display = 'none';
-        document.body.style.overflow = 'auto';
-    }
-
-    static showToast(message, type = 'success') {
-        const toast = document.getElementById('toast');
-        toast.textContent = message;
-        toast.className = `toast ${type}`;
-        toast.style.display = 'flex';
-        
-        setTimeout(() => {
-            toast.style.display = 'none';
-        }, 3000);
-    }
-
-    static formatCurrency(amount) {
-        if (amount === undefined || amount === null) return '0.00';
-        
-        const num = typeof amount === 'string' 
-            ? parseFloat(amount.replace(/[^\d.-]/g, '')) 
-            : Number(amount);
-            
-        return isNaN(num) ? '0.00' : num.toLocaleString('en-US', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-        });
-    }
-
-    static formatDate(dateString) {
-        if (!dateString) return '';
-        const date = new Date(dateString);
-        return date.toLocaleDateString('en-US', {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric'
-        });
-    }
-
-    static showSection(sectionId) {
-        const section = document.getElementById(sectionId);
-        if (section) {
-            section.style.display = 'block';
-        }
-    }
-
-    static hideSection(sectionId) {
-        const section = document.getElementById(sectionId);
-        if (section) {
-            section.style.display = 'none';
-        }
-    }
-}
-
-// Event Handlers
-function getSelectedSearchType() {
-    const radios = document.getElementsByName('searchType');
-    for (let radio of radios) {
-        if (radio.checked) {
-            return radio.value;
-        }
-    }
-    return 'accountName';
-}
-
-async function search() {
-    const type = getSelectedSearchType();
-    const value = document.getElementById('searchInput').value.trim();
-    
-    if (!value) {
-        UIUtils.showToast('Please enter a search value', 'warning');
-        return;
-    }
-
-    UIUtils.showLoading();
-
+// Initialize application
+async function initApp() {
     try {
-        const customer = await apiService.searchCustomer(type, value);
+        UIUtils.showLoading('Initializing Google Apps Script connection...');
+        updateConnectionStatus('connecting');
         
-        if (customer) {
-            displayCustomer(customer);
-            currentCustomer = customer;
-            UIUtils.showSection('detailsSection');
-            UIUtils.showSection('statementsSection');
-            UIUtils.showToast('Customer found successfully', 'success');
+        // Initialize GAS client
+        await initGASClient();
+        
+        // Test connection
+        const connection = await getGASClient().testConnection();
+        
+        if (connection.success) {
+            updateConnectionStatus('connected');
+            UIUtils.showToast('Connected to Google Apps Script successfully!', 'success');
+            setupEventListeners();
+            setupDefaultDates();
+            
+            // Load initial data if needed
+            setTimeout(() => {
+                checkForStoredData();
+            }, 500);
         } else {
-            clearCustomerDetails();
-            UIUtils.showToast('No customer found', 'warning');
+            updateConnectionStatus('error');
+            UIUtils.showToast(`Connection failed: ${connection.message}`, 'error');
         }
+        
     } catch (error) {
-        console.error('Search error:', error);
-        UIUtils.showToast('Error searching customer', 'error');
+        console.error('App initialization failed:', error);
+        updateConnectionStatus('error');
+        UIUtils.showToast(`Initialization failed: ${error.message}`, 'error');
     } finally {
         UIUtils.hideLoading();
     }
 }
 
-function displayCustomer(customer) {
-    document.getElementById('accountName').textContent = customer.accountName || '-';
-    document.getElementById('accountNumber').textContent = customer.accountNumber || '-';
-    document.getElementById('customerId').textContent = customer.customerId || '-';
-    document.getElementById('clearBalance').textContent = 
-        UIUtils.formatCurrency(customer.clearBalance);
+// Update connection status UI
+function updateConnectionStatus(status) {
+    appState.connectionStatus = status;
+    const statusElement = document.getElementById('connectionStatus');
+    
+    if (statusElement) {
+        const icon = statusElement.querySelector('i');
+        const text = statusElement.querySelector('span');
+        
+        switch(status) {
+            case 'connected':
+                icon.className = 'fas fa-circle';
+                icon.style.color = '#4CAF50';
+                text.textContent = 'Connected to GAS';
+                break;
+            case 'connecting':
+                icon.className = 'fas fa-circle-notch fa-spin';
+                icon.style.color = '#FFC107';
+                text.textContent = 'Connecting...';
+                break;
+            case 'error':
+                icon.className = 'fas fa-circle';
+                icon.style.color = '#F44336';
+                text.textContent = 'Connection Error';
+                break;
+            default:
+                icon.className = 'fas fa-circle';
+                icon.style.color = '#9E9E9E';
+                text.textContent = 'Disconnected';
+        }
+    }
 }
 
-function clearCustomerDetails() {
-    document.getElementById('accountName').textContent = '-';
-    document.getElementById('accountNumber').textContent = '-';
-    document.getElementById('customerId').textContent = '-';
-    document.getElementById('clearBalance').textContent = '-';
-    currentCustomer = null;
+// Setup event listeners
+function setupEventListeners() {
+    // Search input events
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', debounce(handleSearchInput, 300));
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchCustomer();
+        });
+        
+        searchInput.addEventListener('focus', () => {
+            if (getSelectedSearchType() === 'accountName' && searchInput.value.trim()) {
+                handleSearchInput();
+            }
+        });
+    }
+    
+    // Date input events
+    const startDate = document.getElementById('startDate');
+    const endDate = document.getElementById('endDate');
+    
+    if (startDate && endDate) {
+        startDate.addEventListener('change', validateDateRange);
+        endDate.addEventListener('change', validateDateRange);
+    }
+    
+    // Search type change
+    const searchTypeRadios = document.querySelectorAll('input[name="searchType"]');
+    searchTypeRadios.forEach(radio => {
+        radio.addEventListener('change', () => {
+            hideAutocompleteDropdown();
+            const searchInput = document.getElementById('searchInput');
+            searchInput.placeholder = getSearchPlaceholder();
+            searchInput.focus();
+        });
+    });
+    
+    // Click outside autocomplete
+    document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('autocompleteDropdown');
+        const searchInput = document.getElementById('searchInput');
+        
+        if (dropdown && !dropdown.contains(e.target) && e.target !== searchInput) {
+            hideAutocompleteDropdown();
+        }
+    });
+    
+    // Window resize
+    window.addEventListener('resize', debounce(handleResize, 250));
 }
 
-function clearAll() {
-    document.getElementById('searchInput').value = '';
-    clearCustomerDetails();
-    hideAutocompleteDropdown();
-    UIUtils.hideSection('detailsSection');
-    UIUtils.hideSection('statementsSection');
-    UIUtils.showToast('Search cleared', 'success');
+// Get search placeholder based on selected type
+function getSearchPlaceholder() {
+    const type = getSelectedSearchType();
+    switch(type) {
+        case 'accountName': return 'Enter account name (e.g., John Doe)...';
+        case 'accountNumber': return 'Enter account number (e.g., 801310452158)...';
+        case 'customerId': return 'Enter customer ID (e.g., CUST001)...';
+        default: return 'Enter search value...';
+    }
 }
 
-// Autocomplete functionality
-const showAutocompleteSuggestions = debounce(async function() {
+// Handle search input with autocomplete
+async function handleSearchInput() {
     const type = getSelectedSearchType();
     const value = document.getElementById('searchInput').value.trim();
     const dropdown = document.getElementById('autocompleteDropdown');
@@ -197,50 +153,60 @@ const showAutocompleteSuggestions = debounce(async function() {
         hideAutocompleteDropdown();
         return;
     }
-
+    
     try {
-        const results = await apiService.autocompleteNames(value);
-        autocompleteResults = results || [];
+        const results = await getGASClient().autocompleteNames(value);
+        appState.autocompleteResults = results || [];
         
-        if (autocompleteResults.length === 0) {
+        if (appState.autocompleteResults.length === 0) {
             hideAutocompleteDropdown();
             return;
         }
         
-        dropdown.innerHTML = '';
-        autocompleteResults.forEach((item, index) => {
-            const div = document.createElement('div');
-            div.className = 'autocomplete-item';
-            div.innerHTML = `
-                <i class="fas fa-user-circle"></i>
-                <div>
-                    <strong>${item.accountName || 'Unknown'}</strong>
-                    <small>${item.accountNumber || ''}</small>
-                </div>
-            `;
-            div.onclick = () => selectAutocomplete(index);
-            dropdown.appendChild(div);
-        });
+        renderAutocompleteResults();
         
-        dropdown.classList.remove('autocomplete-hidden');
     } catch (error) {
-        console.error('Autocomplete error:', error);
+        console.error('Autocomplete failed:', error);
         hideAutocompleteDropdown();
     }
-}, 300);
+}
 
-function selectAutocomplete(index) {
-    const selected = autocompleteResults[index];
+// Render autocomplete results
+function renderAutocompleteResults() {
+    const dropdown = document.getElementById('autocompleteDropdown');
+    dropdown.innerHTML = '';
+    
+    appState.autocompleteResults.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'autocomplete-item';
+        div.innerHTML = `
+            <i class="fas fa-user-circle"></i>
+            <div class="autocomplete-content">
+                <div class="autocomplete-name">${escapeHtml(item.accountName || 'Unknown')}</div>
+                <div class="autocomplete-details">
+                    <span class="account-number">${item.accountNumber || ''}</span>
+                    <span class="customer-id">${item.customerId || ''}</span>
+                </div>
+            </div>
+        `;
+        div.onclick = () => selectAutocompleteResult(index);
+        dropdown.appendChild(div);
+    });
+    
+    dropdown.classList.remove('autocomplete-hidden');
+}
+
+// Select autocomplete result
+function selectAutocompleteResult(index) {
+    const selected = appState.autocompleteResults[index];
     if (!selected) return;
     
     document.getElementById('searchInput').value = selected.accountName || '';
     hideAutocompleteDropdown();
-    displayCustomer(selected);
-    currentCustomer = selected;
-    UIUtils.showSection('detailsSection');
-    UIUtils.showSection('statementsSection');
+    loadCustomerDetails(selected);
 }
 
+// Hide autocomplete dropdown
 function hideAutocompleteDropdown() {
     const dropdown = document.getElementById('autocompleteDropdown');
     if (dropdown) {
@@ -248,241 +214,384 @@ function hideAutocompleteDropdown() {
     }
 }
 
-// Statement Generation
-async function generateStatement() {
-    if (!currentCustomer || !currentCustomer.accountNumber) {
-        UIUtils.showToast('Please select a customer first', 'warning');
+// Main search function
+async function searchCustomer() {
+    const type = getSelectedSearchType();
+    const value = document.getElementById('searchInput').value.trim();
+    
+    if (!value) {
+        UIUtils.showToast('Please enter a search value', 'warning');
         return;
     }
-
-    const accountNumber = currentCustomer.accountNumber;
-    const dateFrom = document.getElementById('dateFrom').value;
-    const dateTo = document.getElementById('dateTo').value;
-
-    // Validate dates
-    if (dateFrom && dateTo && dateFrom > dateTo) {
-        UIUtils.showToast('From date cannot be after To date', 'warning');
-        return;
-    }
-
-    UIUtils.showLoading();
-
+    
+    UIUtils.showLoading('Searching customer...');
+    
     try {
-        const statement = await apiService.generateStatement(accountNumber, dateFrom, dateTo);
-        displayStatement(statement);
-        UIUtils.showToast('Statement generated successfully', 'success');
+        const customer = await getGASClient().searchCustomer(type, value);
+        
+        if (customer) {
+            loadCustomerDetails(customer);
+            UIUtils.showToast('Customer found successfully!', 'success');
+        } else {
+            clearCustomerDetails();
+            UIUtils.showToast('No customer found with the provided details', 'warning');
+        }
+        
     } catch (error) {
-        console.error('Statement generation error:', error);
-        UIUtils.showToast('Error generating statement', 'error');
+        console.error('Search failed:', error);
+        UIUtils.showToast(`Search failed: ${error.message}`, 'error');
     } finally {
         UIUtils.hideLoading();
     }
 }
 
+// Load customer details
+function loadCustomerDetails(customer) {
+    appState.currentCustomer = customer;
+    appState.lastUpdated = new Date();
+    
+    // Update UI
+    document.getElementById('accountName').textContent = customer.accountName || '-';
+    document.getElementById('accountNumber').textContent = customer.accountNumber || '-';
+    document.getElementById('customerId').textContent = customer.customerId || '-';
+    document.getElementById('clearBalance').textContent = 
+        UIUtils.formatCurrency(customer.clearBalance);
+    document.getElementById('lastUpdated').textContent = 
+        UIUtils.formatDateTime(appState.lastUpdated);
+    
+    // Show sections
+    UIUtils.showSection('detailsSection');
+    UIUtils.showSection('statementSection');
+    
+    // Store in localStorage for persistence
+    storeCustomerData(customer);
+}
+
+// Clear search and details
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    clearCustomerDetails();
+    hideAutocompleteDropdown();
+    clearStatement();
+    UIUtils.showToast('Search cleared', 'info');
+}
+
+// Clear customer details
+function clearCustomerDetails() {
+    appState.currentCustomer = null;
+    appState.currentStatement = null;
+    
+    document.getElementById('accountName').textContent = '-';
+    document.getElementById('accountNumber').textContent = '-';
+    document.getElementById('customerId').textContent = '-';
+    document.getElementById('clearBalance').textContent = '-';
+    document.getElementById('lastUpdated').textContent = '-';
+    
+    UIUtils.hideSection('detailsSection');
+    UIUtils.hideSection('statementSection');
+    
+    // Clear localStorage
+    localStorage.removeItem('lastCustomer');
+}
+
+// Setup default dates
+function setupDefaultDates() {
+    const today = new Date();
+    const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+    
+    const startDate = document.getElementById('startDate');
+    const endDate = document.getElementById('endDate');
+    
+    if (startDate && endDate) {
+        startDate.valueAsDate = firstDayOfMonth;
+        endDate.valueAsDate = today;
+        startDate.max = today.toISOString().split('T')[0];
+        endDate.max = today.toISOString().split('T')[0];
+    }
+}
+
+// Set date range quick buttons
+function setDateRange(range) {
+    const today = new Date();
+    const startDate = document.getElementById('startDate');
+    const endDate = document.getElementById('endDate');
+    
+    if (!startDate || !endDate) return;
+    
+    let start = new Date();
+    
+    switch(range) {
+        case 'week':
+            start.setDate(today.getDate() - 7);
+            break;
+        case 'month':
+            start.setMonth(today.getMonth() - 1);
+            break;
+        case 'quarter':
+            start.setMonth(today.getMonth() - 3);
+            break;
+        case 'year':
+            start.setFullYear(today.getFullYear() - 1);
+            break;
+        default:
+            start.setMonth(today.getMonth() - 1);
+    }
+    
+    startDate.valueAsDate = start;
+    endDate.valueAsDate = today;
+}
+
+// Validate date range
+function validateDateRange() {
+    const startDate = document.getElementById('startDate');
+    const endDate = document.getElementById('endDate');
+    
+    if (startDate.value && endDate.value && startDate.value > endDate.value) {
+        UIUtils.showToast('Start date cannot be after end date', 'warning');
+        endDate.value = startDate.value;
+    }
+}
+
+// Update date range
+function updateDateRange() {
+    validateDateRange();
+}
+
+// Generate statement
+async function generateStatement() {
+    if (!appState.currentCustomer || !appState.currentCustomer.accountNumber) {
+        UIUtils.showToast('Please select a customer first', 'warning');
+        return;
+    }
+    
+    const accountNumber = appState.currentCustomer.accountNumber;
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    
+    // Validate dates
+    if (startDate && endDate && startDate > endDate) {
+        UIUtils.showToast('Start date cannot be after end date', 'warning');
+        return;
+    }
+    
+    UIUtils.showLoading('Generating statement from Google Sheets...');
+    
+    try {
+        const statement = await getGASClient().generateStatement(
+            accountNumber, 
+            startDate, 
+            endDate
+        );
+        
+        appState.currentStatement = statement;
+        displayStatement(statement);
+        UIUtils.showToast('Statement generated successfully!', 'success');
+        
+        // Store in localStorage
+        localStorage.setItem('lastStatement', JSON.stringify({
+            timestamp: new Date().toISOString(),
+            accountNumber,
+            startDate,
+            endDate,
+            data: statement
+        }));
+        
+    } catch (error) {
+        console.error('Statement generation failed:', error);
+        UIUtils.showToast(`Failed to generate statement: ${error.message}`, 'error');
+        clearStatement();
+    } finally {
+        UIUtils.hideLoading();
+    }
+}
+
+// Display statement
 function displayStatement(statementData) {
     const container = document.getElementById('statementResults');
+    const summaryContainer = document.getElementById('statementSummary');
     
-    if (!statementData || !Array.isArray(statementData.transactions)) {
+    if (!statementData || !Array.isArray(statementData)) {
         container.innerHTML = `
             <div class="no-results">
                 <i class="fas fa-exclamation-triangle"></i>
-                <p>No statement data available</p>
+                <h3>No Statement Data</h3>
+                <p>No transactions found for the selected period</p>
             </div>
         `;
+        summaryContainer.style.display = 'none';
         return;
     }
-
-    const { transactions, openingBalance, closingBalance } = statementData;
     
+    // Calculate summary
+    let totalDebits = 0;
+    let totalCredits = 0;
+    let openingBalance = 0;
+    let closingBalance = 0;
+    
+    // Filter out opening balance row if present
+    const transactions = statementData.filter(row => row.desc !== 'OPENING BALANCE');
+    const openingRow = statementData.find(row => row.desc === 'OPENING BALANCE');
+    
+    if (openingRow) {
+        openingBalance = parseFloat(openingRow.balance) || 0;
+    }
+    
+    // Build table HTML
     let tableHTML = `
-        <table class="statement-table">
-            <thead>
-                <tr>
-                    <th>Date</th>
-                    <th>Description</th>
-                    <th>Debit</th>
-                    <th>Credit</th>
-                    <th>Balance</th>
-                </tr>
-            </thead>
-            <tbody>
+        <div class="statement-table-container">
+            <table class="statement-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Type</th>
+                        <th>Debit</th>
+                        <th>Credit</th>
+                        <th>Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
     `;
-
-    // Add opening balance row
-    if (openingBalance !== undefined) {
+    
+    // Add opening balance row if exists
+    if (openingRow) {
         tableHTML += `
-            <tr class="opening-row">
-                <td colspan="2">OPENING BALANCE</td>
+            <tr class="opening-balance-row">
+                <td>${UIUtils.formatDate(openingRow.date)}</td>
+                <td colspan="2"><strong>OPENING BALANCE</strong></td>
                 <td></td>
                 <td></td>
                 <td class="balance">${UIUtils.formatCurrency(openingBalance)}</td>
             </tr>
         `;
     }
-
-    // Add transaction rows
-    let runningBalance = openingBalance || 0;
     
-    transactions.forEach(transaction => {
-        const debit = transaction.type === 'DEBIT' ? transaction.amount : '';
-        const credit = transaction.type === 'CREDIT' ? transaction.amount : '';
+    // Add transaction rows
+    let runningBalance = openingBalance;
+    
+    transactions.forEach((transaction, index) => {
+        const amount = parseFloat(transaction.amount) || 0;
+        const isDebit = transaction.type === 'DEBIT';
         
-        if (transaction.type === 'DEBIT') {
-            runningBalance -= transaction.amount;
-        } else if (transaction.type === 'CREDIT') {
-            runningBalance += transaction.amount;
+        if (isDebit) {
+            totalDebits += amount;
+            runningBalance -= amount;
+        } else {
+            totalCredits += amount;
+            runningBalance += amount;
         }
-
+        
         tableHTML += `
-            <tr>
-                <td>${UIUtils.formatDate(transaction.date)}</td>
-                <td>${transaction.description || ''}</td>
-                <td class="debit">${debit ? UIUtils.formatCurrency(debit) : ''}</td>
-                <td class="credit">${credit ? UIUtils.formatCurrency(credit) : ''}</td>
+            <tr class="transaction-row ${index % 2 === 0 ? 'even' : 'odd'}">
+                <td class="date">${UIUtils.formatDate(transaction.date)}</td>
+                <td class="description">${escapeHtml(transaction.desc || '')}</td>
+                <td class="type ${isDebit ? 'debit' : 'credit'}">${transaction.type}</td>
+                <td class="debit">${isDebit ? UIUtils.formatCurrency(amount) : ''}</td>
+                <td class="credit">${!isDebit ? UIUtils.formatCurrency(amount) : ''}</td>
                 <td class="balance">${UIUtils.formatCurrency(runningBalance)}</td>
             </tr>
         `;
     });
-
+    
+    closingBalance = runningBalance;
+    
     // Add closing balance row
-    if (closingBalance !== undefined) {
-        tableHTML += `
-            <tr class="total-row">
-                <td colspan="2">CLOSING BALANCE</td>
-                <td></td>
-                <td></td>
-                <td class="balance">${UIUtils.formatCurrency(closingBalance)}</td>
+    tableHTML += `
+            <tr class="closing-balance-row">
+                <td colspan="3"><strong>CLOSING BALANCE</strong></td>
+                <td class="debit-total">${UIUtils.formatCurrency(totalDebits)}</td>
+                <td class="credit-total">${UIUtils.formatCurrency(totalCredits)}</td>
+                <td class="balance total">${UIUtils.formatCurrency(closingBalance)}</td>
             </tr>
-        `;
-    }
-
-    tableHTML += '</tbody></table>';
+        </tbody>
+    </table>
+    </div>
+    `;
+    
     container.innerHTML = tableHTML;
-}
-
-// Modal Functions
-function openStatementModal() {
-    if (!currentCustomer) {
-        UIUtils.showToast('Please select a customer first', 'warning');
-        return;
-    }
-
-    // Create modal HTML
-    const modalHTML = `
-        <div class="modal-overlay" id="statementModal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3><i class="fas fa-file-invoice-dollar"></i> Statement Details</h3>
-                    <button class="close-btn" onclick="closeStatementModal()">
-                        <i class="fas fa-times"></i>
-                    </button>
-                </div>
-                <div class="modal-body">
-                    <div class="modal-customer-info">
-                        <div class="info-item">
-                            <label>Customer:</label>
-                            <span>${currentCustomer.accountName}</span>
-                        </div>
-                        <div class="info-item">
-                            <label>Account Number:</label>
-                            <span>${currentCustomer.accountNumber}</span>
-                        </div>
-                        <div class="info-item">
-                            <label>Current Balance:</label>
-                            <span>${UIUtils.formatCurrency(currentCustomer.clearBalance)}</span>
-                        </div>
-                    </div>
-                    <div class="modal-actions">
-                        <button class="btn btn-primary" onclick="printStatement()">
-                            <i class="fas fa-print"></i> Print Statement
-                        </button>
-                        <button class="btn btn-secondary" onclick="exportStatement()">
-                            <i class="fas fa-download"></i> Export as PDF
-                        </button>
-                    </div>
+    
+    // Update summary
+    summaryContainer.innerHTML = `
+        <div class="summary-grid">
+            <div class="summary-item">
+                <div class="summary-label">Period</div>
+                <div class="summary-value">${getDateRangeText()}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Opening Balance</div>
+                <div class="summary-value">${UIUtils.formatCurrency(openingBalance)}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Total Debits</div>
+                <div class="summary-value debit">${UIUtils.formatCurrency(totalDebits)}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Total Credits</div>
+                <div class="summary-value credit">${UIUtils.formatCurrency(totalCredits)}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Closing Balance</div>
+                <div class="summary-value">${UIUtils.formatCurrency(closingBalance)}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Net Change</div>
+                <div class="summary-value ${totalCredits - totalDebits >= 0 ? 'credit' : 'debit'}">
+                    ${UIUtils.formatCurrency(totalCredits - totalDebits)}
                 </div>
             </div>
         </div>
     `;
-
-    document.getElementById('modalContainer').innerHTML = modalHTML;
-    document.getElementById('statementModal').style.display = 'flex';
-}
-
-function closeStatementModal() {
-    const modal = document.getElementById('statementModal');
-    if (modal) {
-        modal.style.display = 'none';
-    }
-}
-
-function printStatement() {
-    window.print();
-}
-
-function exportStatement() {
-    UIUtils.showToast('Export feature coming soon', 'info');
-}
-
-// Utility Functions
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-
-// Event Listeners
-document.addEventListener('DOMContentLoaded', function() {
-    // Search input events
-    const searchInput = document.getElementById('searchInput');
-    if (searchInput) {
-        searchInput.addEventListener('input', showAutocompleteSuggestions);
-        searchInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                search();
-            }
-        });
-        
-        searchInput.addEventListener('blur', function() {
-            setTimeout(hideAutocompleteDropdown, 200);
-        });
-    }
-
-    // Date inputs default values
-    const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     
-    document.getElementById('dateFrom').valueAsDate = firstDay;
-    document.getElementById('dateTo').valueAsDate = today;
+    summaryContainer.style.display = 'block';
+    
+    // Add print and export functionality
+    addStatementActions();
+}
 
-    // Search type change
-    const searchTypeRadios = document.querySelectorAll('input[name="searchType"]');
-    searchTypeRadios.forEach(radio => {
-        radio.addEventListener('change', hideAutocompleteDropdown);
-    });
+// Get date range text
+function getDateRangeText() {
+    const startDate = document.getElementById('startDate').value;
+    const endDate = document.getElementById('endDate').value;
+    
+    if (startDate && endDate) {
+        const start = UIUtils.formatDate(startDate);
+        const end = UIUtils.formatDate(endDate);
+        return `${start} to ${end}`;
+    }
+    
+    return 'All dates';
+}
 
-    // Prevent form submission
-    document.addEventListener('submit', function(e) {
-        e.preventDefault();
-    });
+// Clear statement
+function clearStatement() {
+    const container = document.getElementById('statementResults');
+    const summaryContainer = document.getElementById('statementSummary');
+    
+    container.innerHTML = `
+        <div class="placeholder-message">
+            <i class="fas fa-file-alt"></i>
+            <p>Generate a statement to view transaction history</p>
+        </div>
+    `;
+    
+    summaryContainer.style.display = 'none';
+    appState.currentStatement = null;
+    
+    // Clear localStorage
+    localStorage.removeItem('lastStatement');
+}
 
-    // Click outside autocomplete dropdown
-    document.addEventListener('click', function(e) {
-        const dropdown = document.getElementById('autocompleteDropdown');
-        if (dropdown && !dropdown.contains(e.target) && e.target !== searchInput) {
-            hideAutocompleteDropdown();
-        }
-    });
-});
-
-// Error handling
-window.onerror = function(message, source, lineno, colno, error) {
-    console.error('Global error:', { message, source, lineno, colno, error });
-    UIUtils.showToast('An unexpected error occurred', 'error');
-};
+// Add statement actions (print, export)
+function addStatementActions() {
+    const container = document.getElementById('statementResults');
+    
+    // Add print button if not exists
+    if (!container.querySelector('.statement-actions')) {
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'statement-actions';
+        actionsDiv.innerHTML = `
+            <button class="btn btn-sm" onclick="printStatement()">
+                <i class="fas fa-print"></i> Print Statement
+            </button>
+            <button class="btn btn-sm" onclick="exportToCSV()">
+                <i class="fas fa-file-csv"></i> Export CSV
