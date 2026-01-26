@@ -1,5 +1,5 @@
 /**
- * Main Application Script - JSONP Version for Google Apps Script
+ * Main Application Script
  */
 
 // Application State
@@ -13,23 +13,29 @@ document.addEventListener('DOMContentLoaded', function() {
     initApp();
 });
 
-function initApp() {
+async function initApp() {
     console.log('App initialized');
     
-    // Initialize GAS client
-    gasClient = initGASClient();
-    if (!gasClient) {
-        UIUtils.showToast('Please configure GAS URL in config.js', 'error');
-        return;
+    try {
+        // Initialize GAS client
+        gasClient = initGASClient();
+        if (!gasClient) {
+            console.error('Failed to initialize GAS client');
+            UIUtils.showToast('Please check GAS configuration in config.js', 'error');
+            return;
+        }
+        
+        // Test connection
+        await testConnectionOnStartup();
+        
+        // Setup UI
+        setupEventListeners();
+        updateSearchPlaceholder();
+        
+    } catch (error) {
+        console.error('App initialization failed:', error);
+        UIUtils.showToast('Application initialization failed', 'error');
     }
-    
-    setupEventListeners();
-    setupDefaultDates();
-    
-    // Test connection on startup
-    setTimeout(() => {
-        testConnectionOnStartup();
-    }, 1000);
 }
 
 // Test connection on startup
@@ -37,19 +43,19 @@ async function testConnectionOnStartup() {
     if (!gasClient) return;
     
     try {
-        UIUtils.showLoading('Testing connection to GAS...');
+        UIUtils.showLoading('Testing connection...');
         const result = await gasClient.testConnection();
         
         if (result.success) {
-            console.log('GAS connection test successful:', result.message);
+            console.log('GAS connection test successful');
             UIUtils.showToast('Connected to Google Apps Script!', 'success');
         } else {
             console.warn('GAS connection test failed:', result.message);
-            UIUtils.showToast(`Connection warning: ${result.message}`, 'warning');
+            UIUtils.showToast(`Connection issue: ${result.message}`, 'warning');
         }
     } catch (error) {
         console.error('Connection test error:', error);
-        UIUtils.showToast(`Connection error: ${error.message}`, 'error');
+        UIUtils.showToast('Could not connect to server', 'error');
     } finally {
         UIUtils.hideLoading();
     }
@@ -85,73 +91,27 @@ function setupEventListeners() {
             updateSearchPlaceholder();
         });
     }
-    
-    // Click outside autocomplete
-    document.addEventListener('click', function(e) {
-        const dropdown = document.getElementById('autocompleteDropdown');
-        const searchInput = document.getElementById('searchInput');
-        
-        if (dropdown && !dropdown.contains(e.target) && e.target !== searchInput) {
-            dropdown.classList.add('autocomplete-hidden');
-        }
-    });
 }
 
-// Update search placeholder based on selected type
+// Update search placeholder
 function updateSearchPlaceholder() {
     const input = document.getElementById('searchInput');
     if (!input) return;
     
     const type = getSelectedSearchType();
-    let placeholder = '';
-    
     switch(type) {
         case 'accountName':
-            placeholder = 'Enter account name...';
+            input.placeholder = 'Enter account name...';
             break;
         case 'accountNumber':
-            placeholder = 'Enter account number...';
+            input.placeholder = 'Enter account number...';
             break;
         case 'customerId':
-            placeholder = 'Enter customer ID...';
+            input.placeholder = 'Enter customer ID...';
             break;
         default:
-            placeholder = 'Enter value...';
+            input.placeholder = 'Enter value...';
     }
-    
-    input.placeholder = placeholder;
-}
-
-// Setup default dates for modal
-function setupDefaultDates() {
-    // Set max date to today for date inputs
-    const today = new Date().toISOString().split('T')[0];
-    
-    // Set max for modal date inputs when modal is loaded
-    const checkModalDates = () => {
-        const dateFrom = document.getElementById('modalPeriodFromInput');
-        const dateTo = document.getElementById('modalPeriodToInput');
-        
-        if (dateFrom) {
-            dateFrom.max = today;
-            if (!dateFrom.value) {
-                // Set default to first day of current month
-                const firstDay = new Date();
-                firstDay.setDate(1);
-                dateFrom.valueAsDate = firstDay;
-            }
-        }
-        
-        if (dateTo) {
-            dateTo.max = today;
-            if (!dateTo.value) {
-                dateTo.valueAsDate = new Date();
-            }
-        }
-    };
-    
-    // Check periodically for modal
-    setInterval(checkModalDates, 1000);
 }
 
 // Get selected search type
@@ -175,13 +135,22 @@ async function search() {
         return;
     }
     
+    // Hide autocomplete dropdown
     const dd = document.getElementById('autocompleteDropdown');
     if (dd) dd.classList.add('autocomplete-hidden');
     
     UIUtils.showLoading('Searching customer...');
     
     try {
+        if (!gasClient) {
+            throw new Error('GAS client not initialized');
+        }
+        
         const result = await gasClient.searchCustomer(type, value);
+        
+        if (result && result.error) {
+            throw new Error(result.message || result.error);
+        }
         
         if (result) {
             displayCustomer(result);
@@ -194,24 +163,17 @@ async function search() {
     } catch (error) {
         console.error('Search error:', error);
         UIUtils.showToast(`Search failed: ${error.message}`, 'error');
-        
-        // Specific error handling
-        if (error.message.includes('CORS') || error.message.includes('Access-Control')) {
-            UIUtils.showToast('CORS error. Please check GAS deployment permissions.', 'error');
-        } else if (error.message.includes('timeout')) {
-            UIUtils.showToast('Request timeout. Please try again.', 'warning');
-        }
     } finally {
         UIUtils.hideLoading();
     }
 }
 
-// Display customer details
+// Display customer
 function displayCustomer(customer) {
     document.getElementById('accountName').value = customer.accountName || '';
     document.getElementById('accountNumber').value = customer.accountNumber || '';
     document.getElementById('customerNumber').value = customer.customerId || '';
-    document.getElementById('clearBalance').value = customer.clearBalance || '';
+    document.getElementById('clearBalance').value = UIUtils.formatCurrency(customer.clearBalance);
 }
 
 // Clear inputs
@@ -244,6 +206,8 @@ async function handleSearchInput() {
     }
     
     try {
+        if (!gasClient) return;
+        
         const results = await gasClient.autocompleteNames(value);
         autocompleteResults = results || [];
         
@@ -310,28 +274,9 @@ function openCustomerStatementModal(data) {
 }
 
 // Load modal HTML
-async function loadCustomerStatementModal(data) {
-    try {
-        // Use default modal HTML (simpler approach)
-        document.getElementById('modalContainer').innerHTML = getDefaultModalHTML();
-        
-        // Initialize modal dates
-        setTimeout(() => {
-            if (data) {
-                fillAndShowCustomerStatementModal(data);
-            } else {
-                fillAndShowCustomerStatementModal();
-            }
-        }, 100);
-    } catch (error) {
-        console.error('Error loading modal:', error);
-        UIUtils.showToast('Error loading statement modal', 'error');
-    }
-}
-
-// Default modal HTML
-function getDefaultModalHTML() {
-    return `
+function loadCustomerStatementModal(data) {
+    // Use inline modal HTML
+    const modalHTML = `
     <div id="customerStatementModal" class="modal-overlay" style="display:none;">
       <div class="modal-content">
         <button class="close-btn" onclick="closeCustomerStatementModal()" aria-label="Close">&times;</button>
@@ -351,9 +296,9 @@ function getDefaultModalHTML() {
                 <div class="period-row-inner">
                   <span class="label">PERIOD:</span>
                   <span class="label">FROM</span>
-                  <input type="date" id="modalPeriodFromInput" value="" class="date-input">
+                  <input type="date" id="modalPeriodFromInput" class="date-input">
                   <span class="label">TO</span>
-                  <input type="date" id="modalPeriodToInput" value="" class="date-input">
+                  <input type="date" id="modalPeriodToInput" class="date-input">
                   <button class="generate-btn" onclick="generateStatement();return false;">GENERATE</button>
                 </div>
               </div>
@@ -375,6 +320,34 @@ function getDefaultModalHTML() {
       </div>
     </div>
     `;
+    
+    document.getElementById('modalContainer').innerHTML = modalHTML;
+    
+    // Set default dates
+    setTimeout(() => {
+        const today = new Date().toISOString().split('T')[0];
+        const firstDay = new Date();
+        firstDay.setDate(1);
+        const firstDayStr = firstDay.toISOString().split('T')[0];
+        
+        const fromInput = document.getElementById('modalPeriodFromInput');
+        const toInput = document.getElementById('modalPeriodToInput');
+        
+        if (fromInput) {
+            fromInput.value = firstDayStr;
+            fromInput.max = today;
+        }
+        if (toInput) {
+            toInput.value = today;
+            toInput.max = today;
+        }
+        
+        if (data) {
+            fillAndShowCustomerStatementModal(data);
+        } else {
+            fillAndShowCustomerStatementModal();
+        }
+    }, 100);
 }
 
 // Fill and show modal
@@ -394,25 +367,9 @@ function fillAndShowCustomerStatementModal(data) {
     
     if (modalName) modalName.innerText = name;
     if (modalNumber) modalNumber.value = number;
-
-    // Reset dates and table
-    const fromInput = document.getElementById('modalPeriodFromInput');
-    const toInput = document.getElementById('modalPeriodToInput');
+    
+    // Clear table
     const tbody = document.getElementById('statementTableBody');
-    
-    if (fromInput) {
-        // Set default to first day of current month
-        const firstDay = new Date();
-        firstDay.setDate(1);
-        fromInput.valueAsDate = firstDay;
-        fromInput.max = new Date().toISOString().split('T')[0];
-    }
-    
-    if (toInput) {
-        toInput.valueAsDate = new Date();
-        toInput.max = new Date().toISOString().split('T')[0];
-    }
-    
     if (tbody) tbody.innerHTML = '';
     
     const modal = document.getElementById('customerStatementModal');
@@ -459,7 +416,16 @@ async function generateStatement() {
     UIUtils.showLoading('Generating statement...');
     
     try {
+        if (!gasClient) {
+            throw new Error('GAS client not initialized');
+        }
+        
         const results = await gasClient.generateStatement(accountNumber, dateFrom, dateTo);
+        
+        if (results && results.error) {
+            throw new Error(results.message || results.error);
+        }
+        
         displayStatementResults(results);
         UIUtils.showToast('Statement generated successfully!', 'success');
     } catch (error) {
@@ -605,86 +571,6 @@ async function testConnection() {
     }
 }
 
-// Refresh customer data
-async function refreshCustomerData() {
-    if (!currentCustomer || !currentCustomer.accountNumber) {
-        UIUtils.showToast('No customer selected', 'warning');
-        return;
-    }
-    
-    UIUtils.showLoading('Refreshing data...');
-    
-    try {
-        const result = await gasClient.searchCustomer('accountNumber', currentCustomer.accountNumber);
-        
-        if (result) {
-            displayCustomer(result);
-            currentCustomer = result;
-            UIUtils.showToast('Data refreshed successfully', 'success');
-        } else {
-            UIUtils.showToast('Customer no longer exists', 'warning');
-            clearAll();
-        }
-    } catch (error) {
-        UIUtils.showToast('Refresh failed: ' + error.message, 'error');
-    } finally {
-        UIUtils.hideLoading();
-    }
-}
-
-// Export statement to CSV
-function exportToCSV() {
-    const tbody = document.getElementById('statementTableBody');
-    if (!tbody) {
-        UIUtils.showToast('No statement data to export', 'warning');
-        return;
-    }
-    
-    const rows = tbody.querySelectorAll('tr');
-    if (rows.length === 0) {
-        UIUtils.showToast('No statement data to export', 'warning');
-        return;
-    }
-    
-    let csv = 'Date,Description,Type,Debit,Credit,Balance\n';
-    
-    rows.forEach(row => {
-        const cells = row.querySelectorAll('td');
-        if (cells.length >= 5) {
-            const date = cells[0].textContent || '';
-            const desc = '"' + (cells[1].textContent || '').replace(/"/g, '""') + '"';
-            const debit = cells[2].textContent || '';
-            const credit = cells[3].textContent || '';
-            const balance = cells[4].textContent || '';
-            
-            // Determine type based on which column has value
-            const type = debit ? 'DEBIT' : credit ? 'CREDIT' : 'BALANCE';
-            const amount = debit || credit || '';
-            
-            csv += `${date},${desc},${type},${amount},${balance}\n`;
-        }
-    });
-    
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', `statement_${currentCustomer?.accountNumber || 'unknown'}_${new Date().toISOString().slice(0, 10)}.csv`);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    UIUtils.showToast('CSV exported successfully', 'success');
-}
-
-// Print statement
-function printStatement() {
-    window.print();
-}
-
 // Debounce function
 function debounce(func, wait) {
     let timeout;
@@ -706,9 +592,3 @@ window.openCustomerStatementModal = openCustomerStatementModal;
 window.closeCustomerStatementModal = closeCustomerStatementModal;
 window.generateStatement = generateStatement;
 window.testConnection = testConnection;
-window.refreshCustomerData = refreshCustomerData;
-window.exportToCSV = exportToCSV;
-window.printStatement = printStatement;
-
-// Initialize the app
-setTimeout(initApp, 100);
