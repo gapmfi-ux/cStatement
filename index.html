@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Statement System</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <i class="fas fa-university"></i>
+                    <span>Bank Statement System</span>
+                </div>
+                <div class="user-info">
+                    <i class="fas fa-user-circle"></i>
+                    <span>Admin</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Search Section -->
+            <section class="search-section">
+                <div class="search-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-search"></i> Customer Search</h2>
+                        <p class="subtitle">Search by account number, customer ID, or name</p>
+                    </div>
+                    
+                    <div class="search-controls">
+                        <div class="search-type-selector">
+                            <div class="search-type-label">
+                                <i class="fas fa-filter"></i> Search Type:
+                            </div>
+                            <div class="search-options">
+                                <label class="search-radio">
+                                    <input type="radio" name="searchType" value="accountName" checked>
+                                    <span class="radio-label">
+                                        <i class="fas fa-user"></i> Account Name
+                                    </span>
+                                </label>
+                                <label class="search-radio">
+                                    <input type="radio" name="searchType" value="accountNumber">
+                                    <span class="radio-label">
+                                        <i class="fas fa-credit-card"></i> Account Number
+                                    </span>
+                                </label>
+                                <label class="search-radio">
+                                    <input type="radio" name="searchType" value="customerId">
+                                    <span class="radio-label">
+                                        <i class="fas fa-id-card"></i> Customer ID
+                                    </span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="search-input-group">
+                            <div class="search-input-wrapper">
+                                <i class="fas fa-search search-icon"></i>
+                                <input 
+                                    id="searchInput" 
+                                    class="search-input" 
+                                    type="text" 
+                                    placeholder="Enter search value..."
+                                    autocomplete="off"
+                                >
+                                <div id="autocompleteDropdown" class="autocomplete-dropdown autocomplete-hidden"></div>
+                            </div>
+                            <div class="search-buttons">
+                                <button class="btn btn-primary" onclick="search()">
+                                    <i class="fas fa-search"></i> Search
+                                </button>
+                                <button class="btn btn-secondary" onclick="clearAll()">
+                                    <i class="fas fa-eraser"></i> Clear
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Customer Details Section -->
+            <section class="details-section" id="detailsSection" style="display: none;">
+                <div class="details-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-user-tie"></i> Customer Details</h2>
+                        <button class="btn btn-success" onclick="openStatementModal()">
+                            <i class="fas fa-file-invoice-dollar"></i> View Statement
+                        </button>
+                    </div>
+                    
+                    <div class="customer-info-grid">
+                        <div class="info-group">
+                            <div class="info-item">
+                                <label class="info-label">
+                                    <i class="fas fa-user"></i> Account Name
+                                </label>
+                                <div class="info-value" id="accountName">-</div>
+                            </div>
+                            <div class="info-item">
+                                <label class="info-label">
+                                    <i class="fas fa-credit-card"></i> Account Number
+                                </label>
+                                <div class="info-value" id="accountNumber">-</div>
+                            </div>
+                        </div>
+                        
+                        <div class="info-group">
+                            <div class="info-item">
+                                <label class="info-label">
+                                    <i class="fas fa-id-card"></i> Customer ID
+                                </label>
+                                <div class="info-value" id="customerId">-</div>
+                            </div>
+                            <div class="info-item">
+                                <label class="info-label">
+                                    <i class="fas fa-wallet"></i> Current Balance
+                                </label>
+                                <div class="info-value" id="clearBalance">-</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Recent Statements Section -->
+            <section class="statements-section" id="statementsSection" style="display: none;">
+                <div class="statements-card">
+                    <div class="card-header">
+                        <h2><i class="fas fa-history"></i> Recent Statements</h2>
+                        <button class="btn btn-outline" onclick="generateStatement()">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                    
+                    <div class="statements-controls">
+                        <div class="date-range">
+                            <div class="date-input-group">
+                                <label><i class="fas fa-calendar-alt"></i> From</label>
+                                <input type="date" id="dateFrom" class="date-input">
+                            </div>
+                            <div class="date-input-group">
+                                <label><i class="fas fa-calendar-alt"></i> To</label>
+                                <input type="date" id="dateTo" class="date-input">
+                            </div>
+                            <button class="btn btn-primary" onclick="generateStatement()">
+                                <i class="fas fa-file-export"></i> Generate Statement
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="statement-results" id="statementResults">
+                        <!-- Statement table will be inserted here -->
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <p>© 2024 Bank Statement System. All rights reserved.</p>
+                <p class="version">v1.0.0</p>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Loading Spinner -->
+    <div id="loadingSpinner" class="loading-overlay">
+        <div class="spinner-container">
+            <div class="spinner"></div>
+            <p class="loading-text">Processing...</p>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Modal Container -->
+    <div id="modalContainer"></div>
+
+    <!-- Scripts -->
+    <script src="config.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
