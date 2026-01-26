@@ -595,3 +595,224 @@ function addStatementActions() {
             </button>
             <button class="btn btn-sm" onclick="exportToCSV()">
                 <i class="fas fa-file-csv"></i> Export CSV
+            </button>
+            <button class="btn btn-sm" onclick="exportToPDF()">
+                <i class="fas fa-file-pdf"></i> Export PDF
+            </button>
+        `;
+        container.insertBefore(actionsDiv, container.firstChild);
+    }
+}
+
+// Print statement
+function printStatement() {
+    window.print();
+}
+
+// Export to CSV
+function exportToCSV() {
+    if (!appState.currentStatement) {
+        UIUtils.showToast('No statement data to export', 'warning');
+        return;
+    }
+    
+    const data = appState.currentStatement;
+    let csv = 'Date,Description,Type,Amount,Balance\n';
+    
+    data.forEach(row => {
+        const date = UIUtils.formatDate(row.date);
+        const desc = `"${(row.desc || '').replace(/"/g, '""')}"`;
+        const type = row.type;
+        const amount = row.amount || '';
+        const balance = row.balance || '';
+        
+        csv += `${date},${desc},${type},${amount},${balance}\n`;
+    });
+    
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `statement_${appState.currentCustomer?.accountNumber || 'unknown'}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    
+    UIUtils.showToast('CSV exported successfully!', 'success');
+}
+
+// Export to PDF (using browser print)
+function exportToPDF() {
+    UIUtils.showToast('Use Print function and select "Save as PDF"', 'info');
+    setTimeout(() => {
+        window.print();
+    }, 1000);
+}
+
+// Test connection
+async function testConnection() {
+    UIUtils.showLoading('Testing connection to Google Apps Script...');
+    
+    try {
+        const result = await getGASClient().testConnection();
+        
+        if (result.success) {
+            UIUtils.showToast('Connection test successful!', 'success');
+        } else {
+            UIUtils.showToast(`Connection test failed: ${result.message}`, 'error');
+        }
+        
+    } catch (error) {
+        UIUtils.showToast(`Connection test error: ${error.message}`, 'error');
+    } finally {
+        UIUtils.hideLoading();
+    }
+}
+
+// Refresh customer data
+async function refreshCustomerData() {
+    if (!appState.currentCustomer) {
+        UIUtils.showToast('No customer selected', 'warning');
+        return;
+    }
+    
+    UIUtils.showLoading('Refreshing customer data...');
+    
+    try {
+        const customer = await getGASClient().searchCustomer(
+            'accountNumber', 
+            appState.currentCustomer.accountNumber
+        );
+        
+        if (customer) {
+            loadCustomerDetails(customer);
+            UIUtils.showToast('Customer data refreshed!', 'success');
+        } else {
+            UIUtils.showToast('Customer not found (may have been deleted)', 'warning');
+            clearCustomerDetails();
+        }
+        
+    } catch (error) {
+        UIUtils.showToast(`Refresh failed: ${error.message}`, 'error');
+    } finally {
+        UIUtils.hideLoading();
+    }
+}
+
+// Store customer data in localStorage
+function storeCustomerData(customer) {
+    localStorage.setItem('lastCustomer', JSON.stringify({
+        customer,
+        timestamp: new Date().toISOString()
+    }));
+}
+
+// Check for stored data on load
+function checkForStoredData() {
+    try {
+        const lastCustomer = localStorage.getItem('lastCustomer');
+        const lastStatement = localStorage.getItem('lastStatement');
+        
+        if (lastCustomer) {
+            const data = JSON.parse(lastCustomer);
+            const customer = data.customer;
+            
+            // Check if data is not too old (1 hour)
+            const timestamp = new Date(data.timestamp);
+            const now = new Date();
+            const hoursDiff = (now - timestamp) / (1000 * 60 * 60);
+            
+            if (hoursDiff < 1) {
+                // Load customer
+                document.getElementById('searchInput').value = customer.accountName || customer.accountNumber || '';
+                loadCustomerDetails(customer);
+                
+                // Load statement if exists
+                if (lastStatement) {
+                    const statementData = JSON.parse(lastStatement);
+                    if (statementData.accountNumber === customer.accountNumber) {
+                        const startDate = document.getElementById('startDate');
+                        const endDate = document.getElementById('endDate');
+                        
+                        if (startDate && endDate) {
+                            startDate.value = statementData.startDate || '';
+                            endDate.value = statementData.endDate || '';
+                        }
+                        
+                        appState.currentStatement = statementData.data;
+                        displayStatement(statementData.data);
+                    }
+                }
+                
+                UIUtils.showToast('Loaded previous session data', 'info');
+            }
+        }
+    } catch (error) {
+        console.warn('Failed to load stored data:', error);
+        // Clear corrupt data
+        localStorage.removeItem('lastCustomer');
+        localStorage.removeItem('lastStatement');
+    }
+}
+
+// Handle window resize
+function handleResize() {
+    // Adjust UI elements for mobile
+    if (window.innerWidth < 768) {
+        document.body.classList.add('mobile-view');
+    } else {
+        document.body.classList.remove('mobile-view');
+    }
+}
+
+// Utility functions
+function getSelectedSearchType() {
+    const radios = document.getElementsByName('searchType');
+    for (let radio of radios) {
+        if (radio.checked) {
+            return radio.value;
+        }
+    }
+    return 'accountName';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Debounce function
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize UI utilities
+    if (typeof UIUtils === 'undefined') {
+        console.error('UIUtils not found. Make sure script.js loads after UI utils.');
+        return;
+    }
+    
+    // Start app initialization
+    setTimeout(initApp, 100);
+});
+
+// Public API for buttons
+window.searchCustomer = searchCustomer;
+window.clearSearch = clearSearch;
+window.generateStatement = generateStatement;
+window.clearStatement = clearStatement;
+window.printStatement = printStatement;
+window.exportToCSV = exportToCSV;
+window.exportToPDF = exportToPDF;
+window.testConnection = testConnection;
+window.refreshCustomerData = refreshCustomerData;
+window.setDateRange = setDateRange;
