@@ -20,14 +20,21 @@ class UIUtils {
 
     static showToast(message, type = 'info') {
         const toast = document.getElementById('toast');
-        if (!toast) return;
+        if (!toast) {
+            // Create toast if it doesn't exist
+            const toastEl = document.createElement('div');
+            toastEl.id = 'toast';
+            toastEl.className = 'toast';
+            document.body.appendChild(toastEl);
+        }
         
-        toast.textContent = message;
-        toast.className = `toast ${type}`;
-        toast.style.display = 'flex';
+        const toastElement = document.getElementById('toast');
+        toastElement.textContent = message;
+        toastElement.className = `toast ${type}`;
+        toastElement.style.display = 'flex';
         
         setTimeout(() => {
-            toast.style.display = 'none';
+            toastElement.style.display = 'none';
         }, 3000);
     }
 
@@ -44,15 +51,11 @@ class UIUtils {
         });
     }
 
-    static formatDate(dateString) {
-        if (!dateString) return '';
-        try {
-            const date = new Date(dateString);
-            if (isNaN(date.getTime())) return dateString;
-            return date.toLocaleDateString('en-US');
-        } catch {
-            return dateString;
-        }
+    static escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 }
 
