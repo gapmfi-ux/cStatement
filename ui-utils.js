@@ -3,21 +3,15 @@
  */
 class UIUtils {
     static showLoading(message = 'Loading...') {
-        const spinner = document.getElementById('loadingSpinner');
+        const spinner = document.getElementById('globalSpinner');
         if (spinner) {
             spinner.style.display = 'flex';
         }
-        
-        const loadingText = spinner?.querySelector('.loading-text');
-        if (loadingText && message) {
-            loadingText.textContent = message;
-        }
-        
         document.body.classList.add('loading');
     }
 
     static hideLoading() {
-        const spinner = document.getElementById('loadingSpinner');
+        const spinner = document.getElementById('globalSpinner');
         if (spinner) {
             spinner.style.display = 'none';
         }
@@ -52,58 +46,13 @@ class UIUtils {
 
     static formatDate(dateString) {
         if (!dateString) return '';
-        
         try {
             const date = new Date(dateString);
             if (isNaN(date.getTime())) return dateString;
-            
-            return date.toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            });
+            return date.toLocaleDateString('en-US');
         } catch {
             return dateString;
         }
-    }
-
-    static formatDateTime(date) {
-        if (!date) return '';
-        
-        try {
-            const d = new Date(date);
-            if (isNaN(d.getTime())) return '';
-            
-            return d.toLocaleString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-        } catch {
-            return '';
-        }
-    }
-
-    static showSection(sectionId) {
-        const section = document.getElementById(sectionId);
-        if (section) {
-            section.style.display = 'block';
-        }
-    }
-
-    static hideSection(sectionId) {
-        const section = document.getElementById(sectionId);
-        if (section) {
-            section.style.display = 'none';
-        }
-    }
-
-    static escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 }
 
