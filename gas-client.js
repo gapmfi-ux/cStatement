@@ -60,55 +60,65 @@ class GASClient {
     }
     
     // Alternative: JSONP request
-    makeJSONPRequest(action, data = {}) {
-        return new Promise((resolve, reject) => {
-            // Create unique callback name
-            const callbackName = 'gasCallback_' + Date.now();
-            
-            // Build URL
-            const params = new URLSearchParams();
-            params.append('action', action);
-            params.append('callback', callbackName);
-            
-            for (const [key, value] of Object.entries(data)) {
-                if (value !== null && value !== undefined) {
-                    params.append(key, value.toString());
-                }
+ // In gas-client.js - Update the makeJSONPRequest function
+makeJSONPRequest(action, data = {}) {
+    return new Promise((resolve, reject) => {
+        // Create unique callback name
+        const callbackName = 'gasCallback_' + Date.now();
+        
+        // Build URL
+        const params = new URLSearchParams();
+        params.append('action', action);
+        params.append('callback', callbackName);
+        
+        for (const [key, value] of Object.entries(data)) {
+            if (value !== null && value !== undefined) {
+                params.append(key, value.toString());
             }
+        }
+        
+        const url = `${this.baseUrl}?${params.toString()}`;
+        
+        // Create script element
+        const script = document.createElement('script');
+        script.src = url;
+        
+        // INCREASE TIMEOUT to 30 seconds for statement generation
+        const isStatementRequest = action === 'generateStatement';
+        const timeoutDuration = isStatementRequest ? 30000 : 10000; // 30 seconds for statements
+        
+        const timeout = setTimeout(() => {
+            window[callbackName] = null;
+            document.head.removeChild(script);
+            reject(new Error(`Request timeout (${timeoutDuration/1000}s)`));
+        }, timeoutDuration);
+        
+        // Define callback
+        window[callbackName] = (response) => {
+            clearTimeout(timeout);
+            window[callbackName] = null;
+            document.head.removeChild(script);
             
-            const url = `${this.baseUrl}?${params.toString()}`;
-            
-            // Create script element
-            const script = document.createElement('script');
-            script.src = url;
-            
-            // Set timeout
-            const timeout = setTimeout(() => {
-                window[callbackName] = null;
-                document.head.removeChild(script);
-                reject(new Error('Request timeout'));
-            }, 10000);
-            
-            // Define callback
-            window[callbackName] = (response) => {
-                clearTimeout(timeout);
-                window[callbackName] = null;
-                document.head.removeChild(script);
+            // Check for GAS errors
+            if (response && response.error) {
+                reject(new Error(response.message || 'GAS error'));
+            } else {
                 resolve(response);
-            };
-            
-            // Handle error
-            script.onerror = () => {
-                clearTimeout(timeout);
-                window[callbackName] = null;
-                document.head.removeChild(script);
-                reject(new Error('Failed to load script'));
-            };
-            
-            // Add script to document
-            document.head.appendChild(script);
-        });
-    }
+            }
+        };
+        
+        // Handle error
+        script.onerror = () => {
+            clearTimeout(timeout);
+            window[callbackName] = null;
+            document.head.removeChild(script);
+            reject(new Error('Failed to load script'));
+        };
+        
+        // Add script to document
+        document.head.appendChild(script);
+    });
+}
     
     async searchCustomer(type, value) {
         return this.request('search', { type, value });
