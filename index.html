@@ -3,10 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bank Statement System</title>
+    <title>Bank Statement System (GAS Backend)</title>
     <link rel="stylesheet" href="styles.css">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Apps Script Client Library -->
+    <script src="https://apis.google.com/js/api.js"></script>
 </head>
 <body>
     <div class="container">
@@ -16,10 +18,17 @@
                 <div class="logo">
                     <i class="fas fa-university"></i>
                     <span>Bank Statement System</span>
+                    <span class="backend-badge">Google Apps Script Backend</span>
                 </div>
-                <div class="user-info">
-                    <i class="fas fa-user-circle"></i>
-                    <span>Admin</span>
+                <div class="header-controls">
+                    <div class="connection-status" id="connectionStatus">
+                        <i class="fas fa-circle"></i>
+                        <span>Connecting to GAS...</span>
+                    </div>
+                    <div class="user-info">
+                        <i class="fas fa-user-circle"></i>
+                        <span>Admin</span>
+                    </div>
                 </div>
             </div>
         </header>
@@ -31,7 +40,7 @@
                 <div class="search-card">
                     <div class="card-header">
                         <h2><i class="fas fa-search"></i> Customer Search</h2>
-                        <p class="subtitle">Search by account number, customer ID, or name</p>
+                        <p class="subtitle">Connected to Google Sheets via Apps Script</p>
                     </div>
                     
                     <div class="search-controls">
@@ -74,13 +83,23 @@
                                 <div id="autocompleteDropdown" class="autocomplete-dropdown autocomplete-hidden"></div>
                             </div>
                             <div class="search-buttons">
-                                <button class="btn btn-primary" onclick="search()">
+                                <button class="btn btn-primary" onclick="searchCustomer()">
                                     <i class="fas fa-search"></i> Search
                                 </button>
-                                <button class="btn btn-secondary" onclick="clearAll()">
+                                <button class="btn btn-secondary" onclick="clearSearch()">
                                     <i class="fas fa-eraser"></i> Clear
                                 </button>
+                                <button class="btn btn-outline" onclick="testConnection()">
+                                    <i class="fas fa-wifi"></i> Test Connection
+                                </button>
                             </div>
+                        </div>
+                    </div>
+                    
+                    <div class="connection-info" id="connectionInfo">
+                        <div class="info-row">
+                            <i class="fas fa-info-circle"></i>
+                            <span>Using Google Sheets as database. Ensure GAS web app is deployed.</span>
                         </div>
                     </div>
                 </div>
@@ -91,9 +110,14 @@
                 <div class="details-card">
                     <div class="card-header">
                         <h2><i class="fas fa-user-tie"></i> Customer Details</h2>
-                        <button class="btn btn-success" onclick="openStatementModal()">
-                            <i class="fas fa-file-invoice-dollar"></i> View Statement
-                        </button>
+                        <div class="header-actions">
+                            <button class="btn btn-success" onclick="openStatementModal()">
+                                <i class="fas fa-file-invoice-dollar"></i> View Statement
+                            </button>
+                            <button class="btn btn-outline" onclick="refreshCustomerData()">
+                                <i class="fas fa-sync-alt"></i> Refresh
+                            </button>
+                        </div>
                     </div>
                     
                     <div class="customer-info-grid">
@@ -126,38 +150,84 @@
                                 <div class="info-value" id="clearBalance">-</div>
                             </div>
                         </div>
+                        
+                        <div class="info-group">
+                            <div class="info-item">
+                                <label class="info-label">
+                                    <i class="fas fa-database"></i> Data Source
+                                </label>
+                                <div class="info-value">
+                                    <span class="data-source-badge">
+                                        <i class="fab fa-google-drive"></i> Google Sheets
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="info-item">
+                                <label class="info-label">
+                                    <i class="fas fa-calendar-alt"></i> Last Updated
+                                </label>
+                                <div class="info-value" id="lastUpdated">-</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Recent Statements Section -->
-            <section class="statements-section" id="statementsSection" style="display: none;">
-                <div class="statements-card">
+            <!-- Statement Generation Section -->
+            <section class="statement-section" id="statementSection" style="display: none;">
+                <div class="statement-card">
                     <div class="card-header">
-                        <h2><i class="fas fa-history"></i> Recent Statements</h2>
-                        <button class="btn btn-outline" onclick="generateStatement()">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
+                        <h2><i class="fas fa-file-invoice"></i> Generate Statement</h2>
+                        <div class="statement-actions">
+                            <button class="btn btn-outline" onclick="printStatement()">
+                                <i class="fas fa-print"></i> Print
+                            </button>
+                            <button class="btn btn-outline" onclick="exportStatement()">
+                                <i class="fas fa-download"></i> Export
+                            </button>
+                        </div>
                     </div>
                     
-                    <div class="statements-controls">
-                        <div class="date-range">
-                            <div class="date-input-group">
-                                <label><i class="fas fa-calendar-alt"></i> From</label>
-                                <input type="date" id="dateFrom" class="date-input">
+                    <div class="statement-controls">
+                        <div class="date-range-picker">
+                            <div class="date-group">
+                                <label><i class="fas fa-calendar-plus"></i> Start Date</label>
+                                <input type="date" id="startDate" class="date-input" 
+                                       max="" onchange="updateDateRange()">
                             </div>
-                            <div class="date-input-group">
-                                <label><i class="fas fa-calendar-alt"></i> To</label>
-                                <input type="date" id="dateTo" class="date-input">
+                            <div class="date-group">
+                                <label><i class="fas fa-calendar-minus"></i> End Date</label>
+                                <input type="date" id="endDate" class="date-input" 
+                                       max="" onchange="updateDateRange()">
                             </div>
-                            <button class="btn btn-primary" onclick="generateStatement()">
+                            <div class="quick-dates">
+                                <button class="btn btn-sm" onclick="setDateRange('week')">This Week</button>
+                                <button class="btn btn-sm" onclick="setDateRange('month')">This Month</button>
+                                <button class="btn btn-sm" onclick="setDateRange('quarter')">Last 3 Months</button>
+                                <button class="btn btn-sm" onclick="setDateRange('year')">This Year</button>
+                            </div>
+                        </div>
+                        
+                        <div class="generate-actions">
+                            <button class="btn btn-primary btn-lg" onclick="generateStatement()">
                                 <i class="fas fa-file-export"></i> Generate Statement
+                            </button>
+                            <button class="btn btn-secondary" onclick="clearStatement()">
+                                <i class="fas fa-times"></i> Clear Results
                             </button>
                         </div>
                     </div>
                     
                     <div class="statement-results" id="statementResults">
-                        <!-- Statement table will be inserted here -->
+                        <!-- Statement table will be loaded here -->
+                        <div class="placeholder-message">
+                            <i class="fas fa-file-alt"></i>
+                            <p>Generate a statement to view transaction history</p>
+                        </div>
+                    </div>
+                    
+                    <div class="statement-summary" id="statementSummary" style="display: none;">
+                        <!-- Summary will be populated here -->
                     </div>
                 </div>
             </section>
@@ -166,8 +236,15 @@
         <!-- Footer -->
         <footer class="footer">
             <div class="footer-content">
-                <p>© 2024 Bank Statement System. All rights reserved.</p>
-                <p class="version">v1.0.0</p>
+                <div class="footer-info">
+                    <p>© 2024 Bank Statement System | Powered by Google Apps Script & Google Sheets</p>
+                    <p class="version">v2.0.0 | GAS Backend</p>
+                </div>
+                <div class="footer-links">
+                    <a href="#" onclick="showApiDocs()"><i class="fas fa-book"></i> API Docs</a>
+                    <a href="#" onclick="showSettings()"><i class="fas fa-cog"></i> Settings</a>
+                    <a href="#" onclick="showAbout()"><i class="fas fa-info-circle"></i> About</a>
+                </div>
             </div>
         </footer>
     </div>
@@ -176,7 +253,10 @@
     <div id="loadingSpinner" class="loading-overlay">
         <div class="spinner-container">
             <div class="spinner"></div>
-            <p class="loading-text">Processing...</p>
+            <p class="loading-text">Connecting to Google Apps Script...</p>
+            <div class="loading-progress">
+                <div class="progress-bar" id="progressBar"></div>
+            </div>
         </div>
     </div>
 
@@ -188,6 +268,7 @@
 
     <!-- Scripts -->
     <script src="config.js"></script>
+    <script src="gas-client.js"></script>
     <script src="script.js"></script>
 </body>
 </html>
