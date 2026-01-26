@@ -1,74 +1,113 @@
 /**
- * Google Apps Script API Client
+ * Simple Google Apps Script Client
+ * Uses fetch with form data
  */
 class GASClient {
     constructor(baseUrl) {
         this.baseUrl = baseUrl;
+        this.isInitialized = false;
     }
     
-    async request(action, data = null) {
+    async init() {
+        try {
+            // Test connection
+            const testResult = await this.request('test', {});
+            console.log('GAS Client initialized:', testResult);
+            this.isInitialized = true;
+            return true;
+        } catch (error) {
+            console.error('GAS Client initialization failed:', error);
+            return false;
+        }
+    }
+    
+    async request(action, data = {}) {
         const url = this.baseUrl;
-        
-        // Create URL with parameters for GET, or use POST
-        let options = {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            mode: 'cors', // Important for CORS
-            cache: 'no-cache'
-        };
         
         // Create form data
         const formData = new URLSearchParams();
         formData.append('action', action);
         
-        if (data && typeof data === 'object') {
-            for (const [key, value] of Object.entries(data)) {
-                if (value !== null && value !== undefined) {
-                    formData.append(key, value.toString());
-                }
+        // Add data parameters
+        for (const [key, value] of Object.entries(data)) {
+            if (value !== null && value !== undefined) {
+                formData.append(key, value.toString());
             }
         }
-        
-        options.body = formData.toString();
         
         try {
-            const response = await fetch(url, options);
+            const response = await fetch(url, {
+                method: 'POST',
+                mode: 'no-cors', // Use no-cors to avoid CORS issues
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: formData.toString()
+            });
             
-            // Check if response is OK
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
+            // With no-cors mode, we can't read the response
+            // So we need to handle this differently
+            console.log('Request sent to GAS:', action, data);
             
-            const text = await response.text();
+            // Since we can't read the response in no-cors mode,
+            // we'll use a different approach
+            return this.makeJSONPRequest(action, data);
             
-            // Try to parse as JSON
-            try {
-                return JSON.parse(text);
-            } catch (jsonError) {
-                // If not JSON, check if it's an error message from GAS
-                if (text.includes('Exception') || text.includes('Error')) {
-                    throw new Error('Google Apps Script error');
-                }
-                return text;
-            }
         } catch (error) {
             console.error('GAS Request failed:', error);
-            
-            // More specific error messages
-            if (error.message.includes('Failed to fetch')) {
-                throw new Error('Cannot connect to Google Apps Script. Check deployment and CORS settings.');
-            }
-            if (error.message.includes('401') || error.message.includes('Unauthorized')) {
-                throw new Error('Access denied. Please ensure GAS is deployed with "Anyone" access.');
-            }
-            if (error.message.includes('403')) {
-                throw new Error('Forbidden. Check GAS deployment permissions.');
-            }
-            
             throw error;
         }
+    }
+    
+    // Alternative: JSONP request
+    makeJSONPRequest(action, data = {}) {
+        return new Promise((resolve, reject) => {
+            // Create unique callback name
+            const callbackName = 'gasCallback_' + Date.now();
+            
+            // Build URL
+            const params = new URLSearchParams();
+            params.append('action', action);
+            params.append('callback', callbackName);
+            
+            for (const [key, value] of Object.entries(data)) {
+                if (value !== null && value !== undefined) {
+                    params.append(key, value.toString());
+                }
+            }
+            
+            const url = `${this.baseUrl}?${params.toString()}`;
+            
+            // Create script element
+            const script = document.createElement('script');
+            script.src = url;
+            
+            // Set timeout
+            const timeout = setTimeout(() => {
+                window[callbackName] = null;
+                document.head.removeChild(script);
+                reject(new Error('Request timeout'));
+            }, 10000);
+            
+            // Define callback
+            window[callbackName] = (response) => {
+                clearTimeout(timeout);
+                window[callbackName] = null;
+                document.head.removeChild(script);
+                resolve(response);
+            };
+            
+            // Handle error
+            script.onerror = () => {
+                clearTimeout(timeout);
+                window[callbackName] = null;
+                document.head.removeChild(script);
+                reject(new Error('Failed to load script'));
+            };
+            
+            // Add script to document
+            document.head.appendChild(script);
+        });
     }
     
     async searchCustomer(type, value) {
@@ -89,7 +128,7 @@ class GASClient {
     
     async testConnection() {
         try {
-            const result = await this.request('test');
+            const result = await this.request('test', {});
             return {
                 success: true,
                 message: 'Connected to Google Apps Script',
@@ -104,7 +143,7 @@ class GASClient {
     }
 }
 
-// Initialize GAS client
+// Global GAS Client instance
 let gasClient = null;
 
 function initGASClient() {
@@ -113,12 +152,6 @@ function initGASClient() {
     // Check if URL is set
     if (!baseUrl || baseUrl.includes('SCRIPT_ID')) {
         console.error('Please set your Google Apps Script URL in config.js');
-        return null;
-    }
-    
-    // Validate URL format
-    if (!baseUrl.includes('https://script.google.com/macros/s/')) {
-        console.error('Invalid GAS URL format. Should start with: https://script.google.com/macros/s/');
         return null;
     }
     
@@ -134,5 +167,5 @@ function getGASClient() {
 }
 
 // Make globally available
-window.getGASClient = getGASClient;
 window.initGASClient = initGASClient;
+window.getGASClient = getGASClient;
