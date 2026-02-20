@@ -5,6 +5,7 @@
 // Application State
 let currentCustomer = null;
 let autocompleteResults = [];
+let gasClient = null; // Declare globally
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -13,16 +14,21 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 async function initApp() {
-    console.log('App initialized');
+    console.log('App initialization starting...');
     
     try {
-        // Initialize GAS client
-        gasClient = initGASClient();
+        // Ensure GAS client is initialized
+        if (!gasClient) {
+            gasClient = window.initGASClient();
+        }
+        
         if (!gasClient) {
             console.error('Failed to initialize GAS client');
             UIUtils.showToast('Please check GAS configuration in config.js', 'error');
             return;
         }
+        
+        console.log('GAS client initialized successfully');
         
         // Test connection
         await testConnectionOnStartup();
