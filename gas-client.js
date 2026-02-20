@@ -22,14 +22,13 @@ class GASClient {
     }
     
     async request(action, data = {}) {
-        // Use JSONP directly for all requests
         return this.makeJSONPRequest(action, data);
     }
     
     // JSONP request - FIXED: Define callback BEFORE adding script to DOM
     makeJSONPRequest(action, data = {}) {
         return new Promise((resolve, reject) => {
-            // Create unique callback name with timestamp and random suffix
+            // Create unique callback name
             const callbackName = 'gasCallback_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             
             // Create script element FIRST
@@ -55,7 +54,7 @@ class GASClient {
                 }
             };
             
-            // Build URL with query parameters
+            // Build URL
             const params = new URLSearchParams();
             params.append('action', action);
             params.append('callback', callbackName);
@@ -71,9 +70,8 @@ class GASClient {
             
             // Determine timeout based on action
             const isStatementRequest = action === 'generateStatement';
-            const timeoutDuration = isStatementRequest ? 30000 : 10000; // 30 seconds for statements, 10 for others
+            const timeoutDuration = isStatementRequest ? 30000 : 10000;
             
-            // Set timeout
             const timeout = setTimeout(() => {
                 if (window[callbackName]) {
                     delete window[callbackName];
@@ -84,7 +82,7 @@ class GASClient {
                 reject(new Error(`Request timeout (${timeoutDuration/1000}s)`));
             }, timeoutDuration);
             
-            // Handle script load error
+            // Handle error
             script.onerror = () => {
                 clearTimeout(timeout);
                 if (window[callbackName]) {
