@@ -135,7 +135,14 @@ class GASClient {
 // Global GAS Client instance
 let gasClient = null;
 
+// Ensure GAS_CONFIG is defined before initializing client
 function initGASClient() {
+    // Verify config exists
+    if (typeof GAS_CONFIG === 'undefined') {
+        console.error('GAS_CONFIG is not defined. Please check config.js is loaded first.');
+        return null;
+    }
+    
     const baseUrl = GAS_CONFIG.BASE_URL;
     
     // Check if URL is set
@@ -158,3 +165,4 @@ function getGASClient() {
 // Make globally available
 window.initGASClient = initGASClient;
 window.getGASClient = getGASClient;
+window.GASClient = GASClient;
