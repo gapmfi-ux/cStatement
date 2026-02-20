@@ -5,7 +5,7 @@
 // Application State
 let currentCustomer = null;
 let autocompleteResults = [];
-let gasClient = null; // Declare globally
+
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
