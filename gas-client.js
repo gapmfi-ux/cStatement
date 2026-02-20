@@ -1,10 +1,9 @@
-// Updated JSONP callback function to ensure proper timing for callback execution.
-function jsonpCallback(data) {
-    // Process the JSONP response data here
-    console.log(data);
+// Define the callback function first
+function jsonpCallback(response) {
+    // Handle the JSONP response here
 }
 
-// Example of how to trigger the callback
-setTimeout(() => {
-    jsonpCallback({ key: 'value' });
-}, 100); // Ensure this is called after the response is ready
+// Then append the script tag to the DOM
+var script = document.createElement('script');
+script.src = 'https://example.com/api?callback=jsonpCallback';
+document.body.appendChild(script);
