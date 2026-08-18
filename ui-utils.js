@@ -6,6 +6,11 @@ class UIUtils {
         const spinner = document.getElementById('globalSpinner');
         if (spinner) {
             spinner.style.display = 'flex';
+            // Add a message if needed
+            const messageEl = spinner.querySelector('.spinner-message');
+            if (messageEl) {
+                messageEl.textContent = message;
+            }
         }
         document.body.classList.add('loading');
     }
@@ -19,22 +24,31 @@ class UIUtils {
     }
 
     static showToast(message, type = 'info') {
-        const toast = document.getElementById('toast');
+        // Ensure toast element exists
+        let toast = document.getElementById('toast');
         if (!toast) {
-            // Create toast if it doesn't exist
-            const toastEl = document.createElement('div');
-            toastEl.id = 'toast';
-            toastEl.className = 'toast';
-            document.body.appendChild(toastEl);
+            toast = document.createElement('div');
+            toast.id = 'toast';
+            toast.className = 'toast';
+            document.body.appendChild(toast);
         }
         
-        const toastElement = document.getElementById('toast');
-        toastElement.textContent = message;
-        toastElement.className = `toast ${type}`;
-        toastElement.style.display = 'flex';
+        // Clear any existing timeout
+        if (toast._hideTimeout) {
+            clearTimeout(toast._hideTimeout);
+        }
         
-        setTimeout(() => {
-            toastElement.style.display = 'none';
+        toast.textContent = message;
+        toast.className = `toast ${type}`;
+        toast.style.display = 'flex';
+        toast.style.opacity = '1';
+        
+        // Auto-hide after 3 seconds
+        toast._hideTimeout = setTimeout(() => {
+            toast.style.opacity = '0';
+            setTimeout(() => {
+                toast.style.display = 'none';
+            }, 300);
         }, 3000);
     }
 
