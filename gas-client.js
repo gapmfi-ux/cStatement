@@ -1,315 +1,257 @@
-
-class GASClient {
-  constructor(baseUrl) {
-    this.BASE_URL = baseUrl || 'https://script.google.com/macros/s/AKfycbzmjPEYq5F9FvV9mFPy91ahKtkkIIsnRoPctEZW7yfeQozYM5JjcVVMBfZOI6GX1VXrHQ/exec';
-    this.cache = new Map();
-    this.cacheTimeout = 5 * 60 * 1000; // 5 minutes cache
-    this.pendingRequests = new Map(); // Deduplicate concurrent requests
-    this.debug = false; // Set to true for debugging
-    this.isInitialized = false;
-  }
-
-  log(...args) {
-    if (this.debug) {
-      console.log('[GAS Client]', ...args);
+/**
+ * Refactored Google Apps Script Client
+ * Uses Fetch API with proper CORS, error handling, and structured responses
+ */
+class GASClientV2 {
+    constructor(baseUrl, options = {}) {
+        this.baseUrl = baseUrl;
+        this.timeout = options.timeout || 30000;
+        this.isInitialized = false;
+        this.requestId = 0;
     }
-  }
-
-  error(...args) {
-    console.error('[GAS Client]', ...args);
-  }
-
-  // Generic request method with caching and deduplication
-  async request(action, data = {}, options = {}) {
-    const cacheKey = `${action}_${JSON.stringify(data)}`;
-    const useCache = options.useCache !== false;
     
-    // Check cache first
-    if (useCache && this.cache.has(cacheKey)) {
-      const cached = this.cache.get(cacheKey);
-      if (Date.now() - cached.timestamp < this.cacheTimeout) {
-        this.log(`Cache hit for ${action}`);
-        return cached.data;
-      } else {
-        this.cache.delete(cacheKey);
-      }
+    async init() {
+        try {
+            console.log('GASClientV2: Initializing...');
+            const result = await this.request('test', {}, { timeout: 5000 });
+            
+            if (!result.success) {
+                throw new Error(result.message || 'Server returned error');
+            }
+            
+            this.isInitialized = true;
+            console.log('GASClientV2: Initialization successful');
+            return true;
+        } catch (error) {
+            console.error('GASClientV2: Initialization failed:', error);
+            return false;
+        }
     }
-
-    // Deduplicate concurrent requests for the same action
-    if (this.pendingRequests.has(cacheKey)) {
-      this.log(`Deduplicating request for ${action}`);
-      return this.pendingRequests.get(cacheKey);
+    
+    /**
+     * Core request method with proper error handling
+     * @param {string} action - The GAS function to call
+     * @param {object} data - Request parameters
+     * @param {object} options - Request options (timeout, etc)
+     * @returns {Promise<object>} Response data
+     */
+    async request(action, data = {}, options = {}) {
+        const requestTimeout = options.timeout || this.timeout;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
+        
+        try {
+            // Build request body
+            const body = new FormData();
+            body.append('action', action);
+            
+            for (const [key, value] of Object.entries(data)) {
+                if (value !== null && value !== undefined) {
+                    body.append(key, String(value));
+                }
+            }
+            
+            // Make request with structured error handling
+            const response = await fetch(this.baseUrl, {
+                method: 'POST',
+                body: body,
+                signal: controller.signal,
+                headers: {
+                    'Accept': 'application/json'
+                }
+            });
+            
+            clearTimeout(timeoutId);
+            
+            // Parse response
+            const responseData = await response.json();
+            
+            // Check for HTTP errors
+            if (!response.ok) {
+                throw new APIError(
+                    responseData.message || `HTTP ${response.status}`,
+                    response.status,
+                    responseData
+                );
+            }
+            
+            // Check for application errors
+            if (responseData.error) {
+                throw new APIError(
+                    responseData.message || 'Server error',
+                    responseData.errorCode || 500,
+                    responseData
+                );
+            }
+            
+            return responseData;
+            
+        } catch (error) {
+            clearTimeout(timeoutId);
+            
+            if (error instanceof APIError) {
+                throw error;
+            }
+            
+            if (error.name === 'AbortError') {
+                throw new APIError(
+                    `Request timeout after ${requestTimeout}ms`,
+                    'TIMEOUT',
+                    { timeout: requestTimeout }
+                );
+            }
+            
+            throw new APIError(
+                error.message || 'Network error',
+                'NETWORK_ERROR',
+                { originalError: error }
+            );
+        }
     }
-
-    // Create the request promise
-    const requestPromise = new Promise((resolve, reject) => {
-      try {
-        // Generate a unique callback name
-        const callbackName = 'gas_callback_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
-        
-        // Build the URL with parameters
-        const url = new URL(this.BASE_URL);
-        url.searchParams.append('action', action);
-        url.searchParams.append('callback', callbackName);
-        
-        // Add data parameters
-        for (const [key, value] of Object.entries(data)) {
-          if (value !== null && value !== undefined && value !== '') {
-            url.searchParams.append(key, value.toString());
-          }
+    
+    /**
+     * Search for a customer
+     * @param {string} type - Search type: 'accountName', 'accountNumber', 'customerId'
+     * @param {string} value - Search value
+     * @returns {Promise<object>} Customer data
+     */
+    async searchCustomer(type, value) {
+        if (!type || !value) {
+            throw new APIError('Search type and value are required', 'INVALID_PARAMS');
         }
         
-        const fullUrl = url.toString();
-        this.log(`Requesting: ${action}`, data);
+        const result = await this.request('search', { type, value });
         
-        // Determine timeout based on action
-        const isStatementRequest = action === 'generateStatement';
-        const timeoutDuration = isStatementRequest ? 30000 : 10000;
-        
-        // Set timeout
-        const timeoutId = setTimeout(() => {
-          if (window[callbackName]) {
-            delete window[callbackName];
-            this.error(`Request timeout for ${action}`);
-            reject(new Error(`Request timeout after ${timeoutDuration/1000} seconds`));
-          }
-        }, timeoutDuration);
-        
-        // Create the callback function
-        window[callbackName] = (response) => {
-          clearTimeout(timeoutId);
-          delete window[callbackName];
-          
-          if (script.parentNode) {
-            script.parentNode.removeChild(script);
-          }
-          
-          this.log(`Response for ${action}:`, response);
-          
-          // Check for errors
-          if (response && response.error) {
-            reject(new Error(response.message || 'GAS error'));
-            return;
-          }
-          
-          // Check for success
-          if (response && response.success === false) {
-            reject(new Error(response.message || 'API request failed'));
-            return;
-          }
-          
-          // Cache the response
-          this.cache.set(cacheKey, {
-            data: response,
-            timestamp: Date.now()
-          });
-          resolve(response);
-        };
-        
-        // Create and add the script tag
-        const script = document.createElement('script');
-        script.src = fullUrl;
-        script.onerror = () => {
-          clearTimeout(timeoutId);
-          delete window[callbackName];
-          if (script.parentNode) script.parentNode.removeChild(script);
-          this.error(`Script error for ${action}`);
-          reject(new Error('Network error - failed to connect to server'));
-        };
-        
-        document.head.appendChild(script);
-        this.log(`Script tag added for ${action}`);
-        
-      } catch (error) {
-        this.error(`Request error for ${action}:`, error);
-        reject(error);
-      }
-    });
-
-    // Store the pending request
-    this.pendingRequests.set(cacheKey, requestPromise);
-    
-    try {
-      const result = await requestPromise;
-      return result;
-    } finally {
-      this.pendingRequests.delete(cacheKey);
-    }
-  }
-
-  // Batch load multiple requests
-  async batchRequest(requests) {
-    const results = {};
-    const promises = [];
-    
-    for (const [key, { action, data }] of Object.entries(requests)) {
-      promises.push(
-        this.request(action, data, { showLoading: false })
-          .then(result => { results[key] = result; })
-          .catch(err => { results[key] = { error: err.message }; })
-      );
-    }
-    
-    await Promise.all(promises);
-    return results;
-  }
-
-  // Clear cache for specific action or all
-  clearCache(action = null) {
-    if (action) {
-      const keysToDelete = [];
-      for (const key of this.cache.keys()) {
-        if (key.startsWith(action)) {
-          keysToDelete.push(key);
+        if (!result.data) {
+            throw new APIError('Customer not found', 'NOT_FOUND');
         }
-      }
-      keysToDelete.forEach(key => this.cache.delete(key));
-      this.log(`Cleared cache for action: ${action}`);
-    } else {
-      this.cache.clear();
-      this.log('Cleared all cache');
-    }
-  }
-
-  // Initialize/Test connection
-  async init(options = {}) {
-    try {
-      const result = await this.testConnection(options);
-      console.log('GAS Client initialized:', result);
-      this.isInitialized = true;
-      return result.success;
-    } catch (error) {
-      console.error('GAS Client initialization failed:', error);
-      return false;
-    }
-  }
-
-  // ============================================
-  // CUSTOMER STATEMENT API
-  // ============================================
-  
-  async searchCustomer(type, value, options = {}) {
-    if (!value || !value.trim()) {
-      return null;
-    }
-    return this.request('search', { type, value: value.trim() }, options);
-  }
-  
-  async autocompleteNames(value, options = {}) {
-    if (!value || !value.trim() || value.trim().length < 2) {
-      return [];
-    }
-    const result = await this.request('autocomplete', { value: value.trim() }, options);
-    
-    // Ensure we always return an array
-    if (!result || !Array.isArray(result)) {
-      this.log('Autocomplete result is not an array:', result);
-      return [];
+        
+        return result.data;
     }
     
-    return result;
-  }
-  
-  async generateStatement(accountNumber, dateFrom, dateTo, options = {}) {
-    if (!accountNumber || !accountNumber.trim()) {
-      throw new Error('Account number is required');
+    /**
+     * Autocomplete account names
+     * @param {string} value - Partial account name
+     * @returns {Promise<Array>} Matching accounts
+     */
+    async autocompleteNames(value) {
+        if (!value || value.length < 1) {
+            return [];
+        }
+        
+        const result = await this.request('autocomplete', { value });
+        return result.data || [];
     }
     
-    const result = await this.request('generateStatement', {
-      accountNumber: accountNumber.trim(),
-      dateFrom: dateFrom || '',
-      dateTo: dateTo || ''
-    }, { useCache: false, ...options });
-    
-    // Ensure we always return an array
-    if (!result || !Array.isArray(result)) {
-      this.log('Statement result is not an array:', result);
-      return [];
+    /**
+     * Generate customer statement
+     * @param {string} accountNumber - Account number
+     * @param {string} dateFrom - Start date (YYYY-MM-DD)
+     * @param {string} dateTo - End date (YYYY-MM-DD)
+     * @returns {Promise<Array>} Transaction records
+     */
+    async generateStatement(accountNumber, dateFrom, dateTo) {
+        if (!accountNumber) {
+            throw new APIError('Account number is required', 'INVALID_PARAMS');
+        }
+        
+        const result = await this.request('generateStatement', {
+            accountNumber,
+            dateFrom,
+            dateTo
+        }, { timeout: 45000 }); // Longer timeout for statement generation
+        
+        return result.data || [];
     }
     
-    return result;
-  }
-
-  // ============================================
-  // TEST CONNECTION
-  // ============================================
-  
-  async testConnection(options = {}) {
-    try {
-      const response = await this.request('test', {}, { useCache: false, ...options });
-      return {
-        success: true,
-        message: 'Connected to Google Apps Script',
-        data: response
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: 'Connection failed: ' + error.message
-      };
+    /**
+     * Test connection to GAS backend
+     * @returns {Promise<object>} Connection status
+     */
+    async testConnection() {
+        try {
+            const result = await this.request('test', {}, { timeout: 5000 });
+            return {
+                success: true,
+                message: 'Connected to Google Apps Script',
+                data: result
+            };
+        } catch (error) {
+            return {
+                success: false,
+                message: error.message,
+                errorCode: error.code
+            };
+        }
     }
-  }
-
-  // ============================================
-  // UTILITY METHODS
-  // ============================================
-  
-  // Get customer details by account number
-  async getCustomerByAccount(accountNumber, options = {}) {
-    if (!accountNumber || !accountNumber.trim()) {
-      return null;
+    
+    /**
+     * Get detailed API metrics (for debugging)
+     */
+    getMetrics() {
+        return {
+            baseUrl: this.baseUrl,
+            timeout: this.timeout,
+            isInitialized: this.isInitialized
+        };
     }
-    return this.request('search', { type: 'accountNumber', value: accountNumber.trim() }, options);
-  }
-  
-  // Get customer details by customer ID
-  async getCustomerById(customerId, options = {}) {
-    if (!customerId || !customerId.trim()) {
-      return null;
-    }
-    return this.request('search', { type: 'customerId', value: customerId.trim() }, options);
-  }
-  
-  // Get customer details by account name
-  async getCustomerByName(accountName, options = {}) {
-    if (!accountName || !accountName.trim()) {
-      return null;
-    }
-    return this.request('search', { type: 'accountName', value: accountName.trim() }, options);
-  }
 }
 
-// Global GAS Client instance
+/**
+ * Custom error class for API errors
+ */
+class APIError extends Error {
+    constructor(message, code = 'UNKNOWN', metadata = {}) {
+        super(message);
+        this.name = 'APIError';
+        this.code = code;
+        this.metadata = metadata;
+    }
+    
+    toJSON() {
+        return {
+            message: this.message,
+            code: this.code,
+            metadata: this.metadata
+        };
+    }
+}
+
+// Global client instance
 let gasClient = null;
 
-// Initialize the GAS client
+/**
+ * Initialize the GAS client with the configured base URL
+ */
 function initGASClient() {
-  // Verify config exists
-  if (typeof GAS_CONFIG === 'undefined') {
-    console.error('GAS_CONFIG is not defined. Please check config.js is loaded first.');
-    return null;
-  }
-  
-  const baseUrl = GAS_CONFIG.BASE_URL;
-  
-  // Check if URL is set
-  if (!baseUrl || baseUrl.includes('SCRIPT_ID') || baseUrl.includes('your-script-id')) {
-    console.error('Please set your Google Apps Script URL in config.js');
-    return null;
-  }
-  
-  gasClient = new GASClient(baseUrl);
-  return gasClient;
+    if (typeof GAS_CONFIG === 'undefined') {
+        console.error('GAS_CONFIG is not defined. Please check config.js is loaded first.');
+        return null;
+    }
+    
+    const baseUrl = GAS_CONFIG.BASE_URL;
+    
+    if (!baseUrl || baseUrl.includes('SCRIPT_ID')) {
+        console.error('Please set your Google Apps Script URL in config.js');
+        return null;
+    }
+    
+    gasClient = new GASClientV2(baseUrl);
+    return gasClient;
 }
 
+/**
+ * Get or create the global GAS client instance
+ */
 function getGASClient() {
-  if (!gasClient) {
-    gasClient = initGASClient();
-  }
-  return gasClient;
+    if (!gasClient) {
+        gasClient = initGASClient();
+    }
+    return gasClient;
 }
 
-// For backward compatibility with existing code
-window.GASClient = GASClient;
+// Make globally available
 window.initGASClient = initGASClient;
 window.getGASClient = getGASClient;
+window.GASClientV2 = GASClientV2;
+window.APIError = APIError;
