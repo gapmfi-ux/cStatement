@@ -172,7 +172,7 @@ async function search() {
             throw new Error(result.message || result.error);
         }
         
-        if (result && Object.keys(result).length > 0) {
+        if (result && Object.keys(result).length > 0 && result.accountNumber) {
             displayCustomer(result);
             currentCustomer = result;
             UIUtils.showToast('Customer found successfully!', 'success');
@@ -245,7 +245,16 @@ async function handleSearchInput() {
         if (!gasClient) return;
         
         const results = await gasClient.autocompleteNames(value);
-        autocompleteResults = results || [];
+        
+        // SAFETY: Ensure results is always an array
+        if (!results || !Array.isArray(results)) {
+            console.warn('Autocomplete results is not an array:', results);
+            autocompleteResults = [];
+            if (dropdown) dropdown.classList.add('autocomplete-hidden');
+            return;
+        }
+        
+        autocompleteResults = results;
         
         if (dropdown) {
             dropdown.innerHTML = '';
@@ -291,12 +300,19 @@ async function handleSearchInput() {
         }
     } catch (error) {
         console.error('Autocomplete error:', error);
+        autocompleteResults = [];
         if (dropdown) dropdown.classList.add('autocomplete-hidden');
     }
 }
 
 // Select autocomplete item
 function selectAutocomplete(idx) {
+    // SAFETY: Check if autocompleteResults is an array and has the index
+    if (!Array.isArray(autocompleteResults) || idx >= autocompleteResults.length) {
+        console.warn('Invalid autocomplete selection:', idx, autocompleteResults);
+        return;
+    }
+    
     const selected = autocompleteResults[idx];
     if (!selected) return;
     
