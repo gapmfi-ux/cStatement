@@ -1,11 +1,11 @@
 /**
- * Main Application Script
+ * Main Application Script - Customer Statement App
  */
 
 // Application State
 let currentCustomer = null;
 let autocompleteResults = [];
-
+let apiService = null;
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -17,18 +17,18 @@ async function initApp() {
     console.log('App initialization starting...');
     
     try {
-        // Ensure GAS client is initialized
-        if (!gasClient) {
-            gasClient = window.initGASClient();
+        // Initialize API service
+        if (!apiService) {
+            apiService = window.initApiService();
         }
         
-        if (!gasClient) {
-            console.error('Failed to initialize GAS client');
+        if (!apiService) {
+            console.error('Failed to initialize API service');
             UIUtils.showToast('Please check GAS configuration in config.js', 'error');
             return;
         }
         
-        console.log('GAS client initialized successfully');
+        console.log('API service initialized successfully');
         
         // Test connection
         await testConnectionOnStartup();
@@ -45,17 +45,17 @@ async function initApp() {
 
 // Test connection on startup
 async function testConnectionOnStartup() {
-    if (!gasClient) return;
+    if (!apiService) return;
     
     try {
         UIUtils.showLoading('Testing connection...');
-        const result = await gasClient.testConnection();
+        const result = await apiService.testConnection();
         
-        if (result.success) {
-            console.log('GAS connection test successful');
+        if (result.connected) {
+            console.log('Connection test successful');
             UIUtils.showToast('Connected to Google Apps Script!', 'success');
         } else {
-            console.warn('GAS connection test failed:', result.message);
+            console.warn('Connection test failed:', result.message);
             UIUtils.showToast(`Connection issue: ${result.message}`, 'warning');
         }
     } catch (error) {
@@ -147,11 +147,11 @@ async function search() {
     UIUtils.showLoading('Searching customer...');
     
     try {
-        if (!gasClient) {
-            throw new Error('GAS client not initialized');
+        if (!apiService) {
+            throw new Error('API service not initialized');
         }
         
-        const result = await gasClient.searchCustomer(type, value);
+        const result = await apiService.searchCustomer(type, value);
         
         displayCustomer(result);
         currentCustomer = result;
@@ -164,6 +164,8 @@ async function search() {
             UIUtils.showToast('No matching record found.', 'warning');
         } else if (error.code === 'INVALID_PARAMS') {
             UIUtils.showToast(`Invalid search: ${error.message}`, 'warning');
+        } else if (error.code === 'CORS_ERROR') {
+            UIUtils.showToast('CORS Error: Ensure GAS deployment is set to "Anyone" access', 'error');
         } else {
             UIUtils.showToast(`Search failed: ${error.message}`, 'error');
         }
@@ -210,9 +212,9 @@ async function handleSearchInput() {
     }
     
     try {
-        if (!gasClient) return;
+        if (!apiService) return;
         
-        const results = await gasClient.autocompleteNames(value);
+        const results = await apiService.autocompleteNames(value);
         autocompleteResults = results || [];
         
         if (dropdown) {
@@ -279,7 +281,6 @@ function openCustomerStatementModal(data) {
 
 // Load modal HTML
 function loadCustomerStatementModal(data) {
-    // Use inline modal HTML
     const modalHTML = `
     <div id="customerStatementModal" class="modal-overlay" style="display:none;">
       <div class="modal-content">
@@ -420,11 +421,11 @@ async function generateStatement() {
     UIUtils.showLoading('Generating statement...');
     
     try {
-        if (!gasClient) {
-            throw new Error('GAS client not initialized');
+        if (!apiService) {
+            throw new Error('API service not initialized');
         }
         
-        const results = await gasClient.generateStatement(accountNumber, dateFrom, dateTo);
+        const results = await apiService.generateStatement(accountNumber, dateFrom, dateTo);
         
         displayStatementResults(results);
         UIUtils.showToast('Statement generated successfully!', 'success');
@@ -433,6 +434,8 @@ async function generateStatement() {
         
         if (error.code === 'TIMEOUT') {
             UIUtils.showToast('Statement generation took too long. Please try again.', 'error');
+        } else if (error.code === 'CORS_ERROR') {
+            UIUtils.showToast('CORS Error: Ensure GAS deployment is set to "Anyone" access', 'error');
         } else {
             handleStatementError(error);
             UIUtils.showToast(`Statement generation failed: ${error.message}`, 'error');
@@ -554,17 +557,17 @@ function handleStatementError(error) {
 
 // Test connection manually
 async function testConnection() {
-    if (!gasClient) {
-        UIUtils.showToast('GAS client not initialized', 'error');
+    if (!apiService) {
+        UIUtils.showToast('API service not initialized', 'error');
         return;
     }
     
     UIUtils.showLoading('Testing connection...');
     
     try {
-        const result = await gasClient.testConnection();
+        const result = await apiService.testConnection();
         
-        if (result.success) {
+        if (result.connected) {
             UIUtils.showToast('Connection successful! ' + result.message, 'success');
         } else {
             UIUtils.showToast('Connection failed: ' + result.message, 'error');
