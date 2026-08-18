@@ -5,7 +5,7 @@
 // Application State
 let currentCustomer = null;
 let autocompleteResults = [];
-
+let isInitialized = false;
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -37,9 +37,11 @@ async function initApp() {
         setupEventListeners();
         updateSearchPlaceholder();
         
+        isInitialized = true;
+        
     } catch (error) {
         console.error('App initialization failed:', error);
-        UIUtils.showToast('Application initialization failed', 'error');
+        UIUtils.showToast('Application initialization failed: ' + error.message, 'error');
     }
 }
 
@@ -51,16 +53,17 @@ async function testConnectionOnStartup() {
         UIUtils.showLoading('Testing connection...');
         const result = await gasClient.testConnection();
         
-        if (result.success) {
+        if (result && result.success) {
             console.log('GAS connection test successful');
-            UIUtils.showToast('Connected to Google Apps Script!', 'success');
+            // Don't show toast on successful connection - it can be annoying
+            // UIUtils.showToast('Connected to Google Apps Script!', 'success');
         } else {
-            console.warn('GAS connection test failed:', result.message);
-            UIUtils.showToast(`Connection issue: ${result.message}`, 'warning');
+            console.warn('GAS connection test failed:', result ? result.message : 'Unknown error');
+            UIUtils.showToast('Connection issue: ' + (result ? result.message : 'Unknown error'), 'warning');
         }
     } catch (error) {
         console.error('Connection test error:', error);
-        UIUtils.showToast('Could not connect to server', 'error');
+        UIUtils.showToast('Could not connect to server: ' + error.message, 'error');
     } finally {
         UIUtils.hideLoading();
     }
@@ -72,16 +75,20 @@ function setupEventListeners() {
     if (searchInput) {
         searchInput.addEventListener('input', debounce(handleSearchInput, 300));
         
-        searchInput.addEventListener('blur', function() {
+        searchInput.addEventListener('blur', function(e) {
+            // Don't hide if clicking on autocomplete
             setTimeout(() => {
                 const dd = document.getElementById('autocompleteDropdown');
-                if (dd) dd.classList.add('autocomplete-hidden');
+                if (dd && !dd.matches(':hover')) {
+                    dd.classList.add('autocomplete-hidden');
+                }
             }, 200);
         });
         
         // Enter key support
-        searchInput.addEventListener('keypress', function(e) {
+        searchInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
+                e.preventDefault();
                 search();
             }
         });
@@ -94,6 +101,12 @@ function setupEventListeners() {
             const dd = document.getElementById('autocompleteDropdown');
             if (dd) dd.classList.add('autocomplete-hidden');
             updateSearchPlaceholder();
+            // Clear search input when switching types
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput) {
+                searchInput.value = '';
+                searchInput.focus();
+            }
         });
     }
 }
@@ -133,10 +146,12 @@ function getSelectedSearchType() {
 // Main search function
 async function search() {
     const type = getSelectedSearchType();
-    const value = document.getElementById('searchInput').value.trim();
+    const searchInput = document.getElementById('searchInput');
+    const value = searchInput ? searchInput.value.trim() : '';
     
     if (!value) {
         UIUtils.showToast('Please enter a value to search.', 'warning');
+        if (searchInput) searchInput.focus();
         return;
     }
     
@@ -148,7 +163,7 @@ async function search() {
     
     try {
         if (!gasClient) {
-            throw new Error('GAS client not initialized');
+            throw new Error('GAS client not initialized. Please refresh the page.');
         }
         
         const result = await gasClient.searchCustomer(type, value);
@@ -157,7 +172,7 @@ async function search() {
             throw new Error(result.message || result.error);
         }
         
-        if (result) {
+        if (result && Object.keys(result).length > 0) {
             displayCustomer(result);
             currentCustomer = result;
             UIUtils.showToast('Customer found successfully!', 'success');
@@ -167,7 +182,7 @@ async function search() {
         }
     } catch (error) {
         console.error('Search error:', error);
-        UIUtils.showToast(`Search failed: ${error.message}`, 'error');
+        UIUtils.showToast('Search failed: ' + error.message, 'error');
     } finally {
         UIUtils.hideLoading();
     }
@@ -175,37 +190,53 @@ async function search() {
 
 // Display customer
 function displayCustomer(customer) {
-    document.getElementById('accountName').value = customer.accountName || '';
-    document.getElementById('accountNumber').value = customer.accountNumber || '';
-    document.getElementById('customerNumber').value = customer.customerId || '';
-    document.getElementById('clearBalance').value = UIUtils.formatCurrency(customer.clearBalance);
+    if (!customer) return;
+    
+    const accountName = document.getElementById('accountName');
+    const accountNumber = document.getElementById('accountNumber');
+    const customerNumber = document.getElementById('customerNumber');
+    const clearBalance = document.getElementById('clearBalance');
+    
+    if (accountName) accountName.value = customer.accountName || '';
+    if (accountNumber) accountNumber.value = customer.accountNumber || '';
+    if (customerNumber) customerNumber.value = customer.customerId || '';
+    if (clearBalance) clearBalance.value = UIUtils.formatCurrency(customer.clearBalance);
 }
 
 // Clear inputs
 function clearInputs() {
-    document.getElementById('accountName').value = '';
-    document.getElementById('accountNumber').value = '';
-    document.getElementById('customerNumber').value = '';
-    document.getElementById('clearBalance').value = '';
+    const accountName = document.getElementById('accountName');
+    const accountNumber = document.getElementById('accountNumber');
+    const customerNumber = document.getElementById('customerNumber');
+    const clearBalance = document.getElementById('clearBalance');
+    
+    if (accountName) accountName.value = '';
+    if (accountNumber) accountNumber.value = '';
+    if (customerNumber) customerNumber.value = '';
+    if (clearBalance) clearBalance.value = '';
 }
 
 // Clear all
 function clearAll() {
-    document.getElementById('searchInput').value = '';
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) searchInput.value = '';
     clearInputs();
     const dd = document.getElementById('autocompleteDropdown');
     if (dd) dd.classList.add('autocomplete-hidden');
     currentCustomer = null;
+    if (searchInput) searchInput.focus();
     UIUtils.showToast('All fields cleared', 'info');
 }
 
 // Handle search input for autocomplete
 async function handleSearchInput() {
     const type = getSelectedSearchType();
-    const value = document.getElementById('searchInput').value.trim();
+    const searchInput = document.getElementById('searchInput');
+    const value = searchInput ? searchInput.value.trim() : '';
     const dropdown = document.getElementById('autocompleteDropdown');
     
-    if (type !== 'accountName' || !value) {
+    // Only show autocomplete for account name searches with at least 2 characters
+    if (type !== 'accountName' || value.length < 2) {
         if (dropdown) dropdown.classList.add('autocomplete-hidden');
         return;
     }
@@ -224,12 +255,34 @@ async function handleSearchInput() {
                 return;
             }
             
-            autocompleteResults.forEach((item, idx) => {
+            // Limit to 5 results for better UI
+            const displayResults = autocompleteResults.slice(0, 5);
+            
+            displayResults.forEach((item, idx) => {
                 const div = document.createElement('div');
                 div.className = 'autocomplete-item';
-                div.textContent = item.accountName || '(no name)';
-                div.addEventListener('click', function() { 
-                    selectAutocomplete(idx); 
+                // Highlight matching text
+                const name = item.accountName || '(no name)';
+                const lowerName = name.toLowerCase();
+                const lowerValue = value.toLowerCase();
+                const index = lowerName.indexOf(lowerValue);
+                if (index !== -1) {
+                    div.innerHTML = name.substring(0, index) + 
+                        '<strong>' + name.substring(index, index + value.length) + '</strong>' + 
+                        name.substring(index + value.length);
+                } else {
+                    div.textContent = name;
+                }
+                // Add account number as subtitle
+                if (item.accountNumber) {
+                    const subtitle = document.createElement('span');
+                    subtitle.style.cssText = 'display:block;font-size:0.7em;color:#666;';
+                    subtitle.textContent = 'Account: ' + item.accountNumber;
+                    div.appendChild(subtitle);
+                }
+                div.addEventListener('mousedown', function(e) {
+                    e.preventDefault();
+                    selectAutocomplete(idx);
                 });
                 dropdown.appendChild(div);
             });
@@ -247,9 +300,14 @@ function selectAutocomplete(idx) {
     const selected = autocompleteResults[idx];
     if (!selected) return;
     
-    document.getElementById('searchInput').value = selected.accountName || '';
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.value = selected.accountName || '';
+    }
+    
     const dd = document.getElementById('autocompleteDropdown');
     if (dd) dd.classList.add('autocomplete-hidden');
+    
     displayCustomer(selected);
     currentCustomer = selected;
     UIUtils.showToast('Customer selected from suggestions', 'success');
@@ -267,7 +325,7 @@ function openCustomerStatementModal(data) {
     }
 
     if (!currentCustomer) {
-        UIUtils.showToast('Please select a customer first', 'warning');
+        UIUtils.showToast('Please search for a customer first', 'warning');
         return;
     }
 
@@ -362,16 +420,19 @@ function fillAndShowCustomerStatementModal(data) {
     if (data) {
         name = data.accountName || '';
         number = data.accountNumber || '';
+    } else if (currentCustomer) {
+        name = currentCustomer.accountName || '';
+        number = currentCustomer.accountNumber || '';
     } else {
-        name = document.getElementById('accountName').value || '';
-        number = document.getElementById('accountNumber').value || '';
+        name = document.getElementById('accountName')?.value || '';
+        number = document.getElementById('accountNumber')?.value || '';
     }
 
     const modalName = document.getElementById('modalCustomerName');
     const modalNumber = document.getElementById('modalAccountNumber');
     
-    if (modalName) modalName.innerText = name;
-    if (modalNumber) modalNumber.value = number;
+    if (modalName) modalName.innerText = name || 'N/A';
+    if (modalNumber) modalNumber.value = number || '';
     
     // Clear table
     const tbody = document.getElementById('statementTableBody');
@@ -431,12 +492,16 @@ async function generateStatement() {
             throw new Error(results.message || results.error);
         }
         
-        displayStatementResults(results);
-        UIUtils.showToast('Statement generated successfully!', 'success');
+        if (results && Array.isArray(results)) {
+            displayStatementResults(results);
+            UIUtils.showToast('Statement generated successfully!', 'success');
+        } else {
+            throw new Error('Invalid response format');
+        }
     } catch (error) {
         console.error('Statement Error:', error);
         handleStatementError(error);
-        UIUtils.showToast(`Statement generation failed: ${error.message}`, 'error');
+        UIUtils.showToast('Statement generation failed: ' + error.message, 'error');
     } finally {
         UIUtils.hideLoading();
     }
@@ -503,7 +568,7 @@ function displayStatementResults(transactions) {
             row.className = 'transaction-row';
             
             row.innerHTML = `
-                <td class="date">${txn.date}</td>
+                <td class="date">${txn.date || ''}</td>
                 <td class="description">${UIUtils.escapeHtml(txn.desc || '')}</td>
                 <td class="debit">${txn.type === 'DEBIT' ? UIUtils.formatCurrency(amount) : ''}</td>
                 <td class="credit">${txn.type === 'CREDIT' ? UIUtils.formatCurrency(amount) : ''}</td>
@@ -512,7 +577,7 @@ function displayStatementResults(transactions) {
             tbody.appendChild(row);
         });
 
-        // Add TOTAL row
+        // Add TOTAL row if there are transactions
         if (transactions.length > 0) {
             const totalRow = document.createElement('tr');
             totalRow.className = 'total-row';
@@ -543,10 +608,17 @@ function handleStatementError(error) {
     const tbody = document.getElementById('statementTableBody');
     if (!tbody) return;
     
+    let errorMessage = error.message || 'Failed to fetch statement';
+    if (errorMessage.includes('Account not found')) {
+        errorMessage = 'Account number not found. Please verify the account number.';
+    } else if (errorMessage.includes('timeout')) {
+        errorMessage = 'Request timed out. Please try again.';
+    }
+    
     tbody.innerHTML = `
         <tr>
             <td colspan="5" class="error-message">
-                Error: ${error.message || 'Failed to fetch statement'}
+                Error: ${UIUtils.escapeHtml(errorMessage)}
             </td>
         </tr>
     `;
@@ -565,9 +637,9 @@ async function testConnection() {
         const result = await gasClient.testConnection();
         
         if (result.success) {
-            UIUtils.showToast('Connection successful! ' + result.message, 'success');
+            UIUtils.showToast('✅ Connection successful!', 'success');
         } else {
-            UIUtils.showToast('Connection failed: ' + result.message, 'error');
+            UIUtils.showToast('❌ Connection failed: ' + result.message, 'error');
         }
     } catch (error) {
         UIUtils.showToast('Connection error: ' + error.message, 'error');
