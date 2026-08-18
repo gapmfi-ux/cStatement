@@ -2,7 +2,16 @@
 const GAS_CONFIG = {
     // Your deployed GAS web app URL
     // Replace with your actual URL from "Deploy > New deployment" in Google Apps Script
-    BASE_URL: 'https://script.google.com/macros/s/AKfycbzmjPEYq5F9FvV9mFPy91ahKtkkIIsnRoPctEZW7yfeQozYM5JjcVVMBfZOI6GX1VXrHQ/exec'
+    BASE_URL: 'https://script.google.com/macros/s/AKfycbzmjPEYq5F9FvV9mFPy91ahKtkkIIsnRoPctEZW7yfeQozYM5JjcVVMBfZOI6GX1VXrHQ/exec',
+    
+    // Cache settings
+    CACHE: {
+        ENABLED: true,
+        TIMEOUT: 5 * 60 * 1000 // 5 minutes
+    },
+    
+    // Debug mode
+    DEBUG: false
 };
 
 // Validate URL on load
