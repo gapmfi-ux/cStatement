@@ -12,7 +12,7 @@ class ApiService {
       console.log('[API]', ...args);
     }
   }
-
+ 
   error(...args) {
     console.error('[API]', ...args);
   }
