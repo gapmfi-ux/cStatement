@@ -140,39 +140,28 @@ async function search() {
         return;
     }
     
-    // Hide autocomplete dropdown
-    const dd = document.getElementById('autocompleteDropdown');
-    if (dd) dd.classList.add('autocomplete-hidden');
-    
     UIUtils.showLoading('Searching customer...');
     
     try {
-        if (!gasClient) {
-            throw new Error('GAS client not initialized');
-        }
+        if (!gasClient) throw new Error('GAS client not initialized');
         
         const result = await gasClient.searchCustomer(type, value);
         
-        if (result && result.error) {
-            throw new Error(result.message || result.error);
-        }
-        
-        if (result) {
-            displayCustomer(result);
-            currentCustomer = result;
-            UIUtils.showToast('Customer found successfully!', 'success');
-        } else {
-            clearInputs();
-            UIUtils.showToast('No matching record found.', 'warning');
-        }
+        displayCustomer(result);
+        currentCustomer = result;
+        UIUtils.showToast('Customer found successfully!', 'success');
     } catch (error) {
         console.error('Search error:', error);
-        UIUtils.showToast(`Search failed: ${error.message}`, 'error');
+        if (error.code === 'NOT_FOUND') {
+            clearInputs();
+            UIUtils.showToast('No matching record found.', 'warning');
+        } else {
+            UIUtils.showToast(`Search failed: ${error.message}`, 'error');
+        }
     } finally {
         UIUtils.hideLoading();
     }
 }
-
 // Display customer
 function displayCustomer(customer) {
     document.getElementById('accountName').value = customer.accountName || '';
