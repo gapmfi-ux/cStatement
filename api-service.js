@@ -1,11 +1,10 @@
-
 class ApiService {
   constructor(baseUrl) {
     this.BASE_URL = baseUrl;
     this.cache = new Map();
     this.cacheTimeout = 5 * 60 * 1000; // 5 minutes
     this.pendingRequests = new Map(); // Deduplicate concurrent requests
-    this.debug = false;
+    this.debug = (typeof GAS_CONFIG !== 'undefined' && GAS_CONFIG.ENABLE_DEBUG) || false;
   }
 
   log(...args) {
@@ -18,9 +17,8 @@ class ApiService {
     console.error('[API]', ...args);
   }
 
-
   async request(action, data = {}, options = {}) {
-    const timeout = options.timeout || 30000;
+    const timeout = options.timeout || (GAS_CONFIG && GAS_CONFIG.TIMEOUT) || 30000;
     const useCache = options.useCache !== false;
     const cacheKey = `${action}_${JSON.stringify(data)}`;
 
@@ -83,7 +81,7 @@ class ApiService {
         }
       }
 
-      this.log(`Fetching ${action} with timeout ${timeout}ms`);
+      this.log(`Fetching ${action} with timeout ${timeout}ms from ${this.BASE_URL}`);
 
       // Make POST request with Fetch API
       const response = await fetch(this.BASE_URL, {
@@ -99,10 +97,14 @@ class ApiService {
 
       clearTimeout(timeoutId);
 
+      this.log(`Response status: ${response.status} ${response.statusText}`);
+
       // Parse response
       let responseData;
       try {
-        responseData = await response.json();
+        const text = await response.text();
+        this.log(`Response text: ${text.substring(0, 200)}`);
+        responseData = text ? JSON.parse(text) : {};
       } catch (parseError) {
         throw new ApiError(
           'Invalid JSON response from server',
@@ -115,7 +117,7 @@ class ApiService {
       if (!response.ok) {
         throw new ApiError(
           responseData.message || `HTTP ${response.status}`,
-          response.status,
+          response.status === 401 ? 'UNAUTHORIZED' : 'HTTP_ERROR',
           responseData
         );
       }
@@ -154,7 +156,8 @@ class ApiService {
       // Handle CORS errors
       if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
         const corsError = new ApiError(
-          'CORS error: Check that GAS deployment is set to "Anyone" access and frontend URL is allowed',
+          'CORS Error: The GAS deployment may not be configured for your domain. ' +
+          'Ensure the GAS is deployed with "Execute as: Me" and "Who has access: Anyone"',
           'CORS_ERROR',
           { action, originalError: error.message }
         );
@@ -264,11 +267,12 @@ class ApiService {
       throw new ApiError('Account number is required', 'INVALID_PARAMS');
     }
 
+    const timeout = (GAS_CONFIG && GAS_CONFIG.STATEMENT_TIMEOUT) || 45000;
     const result = await this.request('generateStatement', {
       accountNumber,
       dateFrom,
       dateTo
-    }, { ...options, timeout: 45000 }); // Longer timeout for statement generation
+    }, { ...options, timeout });
 
     return result.data || [];
   }
@@ -308,7 +312,7 @@ class ApiError extends Error {
 
 function initApiService() {
   if (typeof GAS_CONFIG === 'undefined') {
-    console.error('GAS_CONFIG not defined');
+    console.error('GAS_CONFIG not defined in config.js');
     return null;
   }
 
@@ -318,16 +322,16 @@ function initApiService() {
     return null;
   }
 
-  apiService = new ApiService(baseUrl);
+  const apiService = new ApiService(baseUrl);
   console.log('ApiService initialized:', apiService.getMetrics());
   return apiService;
 }
 
 function getApiService() {
-  if (!apiService) {
-    apiService = initApiService();
+  if (!window.apiService) {
+    window.apiService = initApiService();
   }
-  return apiService;
+  return window.apiService;
 }
 
 // Make globally available
