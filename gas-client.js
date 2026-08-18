@@ -1,8 +1,4 @@
-/**
- * Customer Statement API Client
- * Uses JSONP for cross-domain communication with Google Apps Script
- * Adopted from the api.js pattern
- */
+
 class GASClient {
   constructor(baseUrl) {
     this.BASE_URL = baseUrl || 'https://script.google.com/macros/s/AKfycbzmjPEYq5F9FvV9mFPy91ahKtkkIIsnRoPctEZW7yfeQozYM5JjcVVMBfZOI6GX1VXrHQ/exec';
