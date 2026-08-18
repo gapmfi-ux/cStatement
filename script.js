@@ -7,7 +7,7 @@
 let currentCustomer = null;
 let autocompleteResults = [];
 let isInitialized = false;
-let gasClient = null;
+
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
