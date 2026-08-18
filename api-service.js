@@ -18,14 +18,7 @@ class ApiService {
     console.error('[API]', ...args);
   }
 
-  /**
-   * Generic request method using Fetch API
-   * Supports: caching, deduplication, timeout, error handling
-   * @param {string} action - The backend action to call
-   * @param {object} data - Request parameters
-   * @param {object} options - Request options (timeout, useCache, showLoading)
-   * @returns {Promise<object>} Response data
-   */
+
   async request(action, data = {}, options = {}) {
     const timeout = options.timeout || 30000;
     const useCache = options.useCache !== false;
