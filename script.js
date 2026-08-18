@@ -5,6 +5,7 @@
 // Application State
 let currentCustomer = null;
 let autocompleteResults = [];
+let apiService = null;
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
