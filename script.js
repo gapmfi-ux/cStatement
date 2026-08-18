@@ -140,10 +140,16 @@ async function search() {
         return;
     }
     
+    // Hide autocomplete dropdown
+    const dd = document.getElementById('autocompleteDropdown');
+    if (dd) dd.classList.add('autocomplete-hidden');
+    
     UIUtils.showLoading('Searching customer...');
     
     try {
-        if (!gasClient) throw new Error('GAS client not initialized');
+        if (!gasClient) {
+            throw new Error('GAS client not initialized');
+        }
         
         const result = await gasClient.searchCustomer(type, value);
         
@@ -152,9 +158,12 @@ async function search() {
         UIUtils.showToast('Customer found successfully!', 'success');
     } catch (error) {
         console.error('Search error:', error);
+        
         if (error.code === 'NOT_FOUND') {
             clearInputs();
             UIUtils.showToast('No matching record found.', 'warning');
+        } else if (error.code === 'INVALID_PARAMS') {
+            UIUtils.showToast(`Invalid search: ${error.message}`, 'warning');
         } else {
             UIUtils.showToast(`Search failed: ${error.message}`, 'error');
         }
@@ -162,6 +171,7 @@ async function search() {
         UIUtils.hideLoading();
     }
 }
+
 // Display customer
 function displayCustomer(customer) {
     document.getElementById('accountName').value = customer.accountName || '';
@@ -416,16 +426,17 @@ async function generateStatement() {
         
         const results = await gasClient.generateStatement(accountNumber, dateFrom, dateTo);
         
-        if (results && results.error) {
-            throw new Error(results.message || results.error);
-        }
-        
         displayStatementResults(results);
         UIUtils.showToast('Statement generated successfully!', 'success');
     } catch (error) {
         console.error('Statement Error:', error);
-        handleStatementError(error);
-        UIUtils.showToast(`Statement generation failed: ${error.message}`, 'error');
+        
+        if (error.code === 'TIMEOUT') {
+            UIUtils.showToast('Statement generation took too long. Please try again.', 'error');
+        } else {
+            handleStatementError(error);
+            UIUtils.showToast(`Statement generation failed: ${error.message}`, 'error');
+        }
     } finally {
         UIUtils.hideLoading();
     }
