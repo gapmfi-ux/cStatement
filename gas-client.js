@@ -125,7 +125,15 @@ class GASClient {
         if (!value || !value.trim()) {
             return [];
         }
-        return this.request('autocomplete', { value: value.trim() });
+        const result = await this.request('autocomplete', { value: value.trim() });
+        
+        // If the result is not an array, return an empty array
+        if (!result || !Array.isArray(result)) {
+            console.warn('Autocomplete result is not an array:', result);
+            return [];
+        }
+        
+        return result;
     }
     
     async generateStatement(accountNumber, dateFrom, dateTo) {
