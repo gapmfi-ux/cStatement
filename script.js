@@ -1,6 +1,6 @@
 /**
  * Main Application Script - Customer Statement App
- */
+ */   
 
 // Application State
 let currentCustomer = null;
