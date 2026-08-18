@@ -6,6 +6,7 @@ class GASClient {
     constructor(baseUrl) {
         this.baseUrl = baseUrl;
         this.isInitialized = false;
+        this.pendingRequests = new Map();
     }
     
     async init() {
@@ -25,25 +26,32 @@ class GASClient {
         return this.makeJSONPRequest(action, data);
     }
     
-    // JSONP request - FIXED: Define callback BEFORE adding script to DOM
+    // JSONP request - Fixed callback execution order
     makeJSONPRequest(action, data = {}) {
         return new Promise((resolve, reject) => {
             // Create unique callback name
             const callbackName = 'gasCallback_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
             
-            // Create script element FIRST
+            // Create script element
             const script = document.createElement('script');
+            let isCompleted = false;
             
-            // **DEFINE CALLBACK IMMEDIATELY** - before the script is added to DOM
+            // Define callback on window BEFORE adding script to DOM
             window[callbackName] = (response) => {
-                clearTimeout(timeout);
+                if (isCompleted) return;
+                isCompleted = true;
                 
                 // Clean up
-                if (window[callbackName]) {
-                    delete window[callbackName];
-                }
+                clearTimeout(timeout);
+                
+                // Remove script
                 if (script && script.parentNode) {
                     script.parentNode.removeChild(script);
+                }
+                
+                // Delete callback
+                if (window[callbackName]) {
+                    delete window[callbackName];
                 }
                 
                 // Check for GAS errors
@@ -60,7 +68,7 @@ class GASClient {
             params.append('callback', callbackName);
             
             for (const [key, value] of Object.entries(data)) {
-                if (value !== null && value !== undefined) {
+                if (value !== null && value !== undefined && value !== '') {
                     params.append(key, value.toString());
                 }
             }
@@ -73,6 +81,10 @@ class GASClient {
             const timeoutDuration = isStatementRequest ? 30000 : 10000;
             
             const timeout = setTimeout(() => {
+                if (isCompleted) return;
+                isCompleted = true;
+                
+                // Clean up
                 if (window[callbackName]) {
                     delete window[callbackName];
                 }
@@ -84,6 +96,9 @@ class GASClient {
             
             // Handle error
             script.onerror = () => {
+                if (isCompleted) return;
+                isCompleted = true;
+                
                 clearTimeout(timeout);
                 if (window[callbackName]) {
                     delete window[callbackName];
@@ -94,24 +109,33 @@ class GASClient {
                 reject(new Error('Failed to load script'));
             };
             
-            // **ADD SCRIPT TO DOCUMENT LAST** - after callback is defined
+            // ADD SCRIPT TO DOCUMENT - callback is already defined
             document.head.appendChild(script);
         });
     }
     
     async searchCustomer(type, value) {
-        return this.request('search', { type, value });
+        if (!value || !value.trim()) {
+            return null;
+        }
+        return this.request('search', { type, value: value.trim() });
     }
     
     async autocompleteNames(value) {
-        return this.request('autocomplete', { value });
+        if (!value || !value.trim()) {
+            return [];
+        }
+        return this.request('autocomplete', { value: value.trim() });
     }
     
     async generateStatement(accountNumber, dateFrom, dateTo) {
+        if (!accountNumber || !accountNumber.trim()) {
+            throw new Error('Account number is required');
+        }
         return this.request('generateStatement', {
-            accountNumber,
-            dateFrom,
-            dateTo
+            accountNumber: accountNumber.trim(),
+            dateFrom: dateFrom || '',
+            dateTo: dateTo || ''
         });
     }
     
@@ -146,7 +170,7 @@ function initGASClient() {
     const baseUrl = GAS_CONFIG.BASE_URL;
     
     // Check if URL is set
-    if (!baseUrl || baseUrl.includes('SCRIPT_ID')) {
+    if (!baseUrl || baseUrl.includes('SCRIPT_ID') || baseUrl.includes('your-script-id')) {
         console.error('Please set your Google Apps Script URL in config.js');
         return null;
     }
