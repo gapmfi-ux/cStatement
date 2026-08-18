@@ -306,9 +306,6 @@ class ApiError extends Error {
   }
 }
 
-// Global API instance (will be initialized after config loads)
-let apiService = null;
-
 function initApiService() {
   if (typeof GAS_CONFIG === 'undefined') {
     console.error('GAS_CONFIG not defined');
