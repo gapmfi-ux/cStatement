@@ -1,11 +1,13 @@
 /**
  * Main Application Script
+ * Updated to use the new GASClient
  */
 
 // Application State
 let currentCustomer = null;
 let autocompleteResults = [];
 let isInitialized = false;
+let gasClient = null;
 
 // Initialize when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
@@ -17,10 +19,8 @@ async function initApp() {
     console.log('App initialization starting...');
     
     try {
-        // Ensure GAS client is initialized
-        if (!gasClient) {
-            gasClient = window.initGASClient();
-        }
+        // Initialize GAS client
+        gasClient = initGASClient();
         
         if (!gasClient) {
             console.error('Failed to initialize GAS client');
@@ -28,7 +28,10 @@ async function initApp() {
             return;
         }
         
-        console.log('GAS client initialized successfully');
+        // Set debug mode
+        gasClient.debug = GAS_CONFIG.DEBUG || false;
+        
+        console.log('GAS client created successfully');
         
         // Test connection
         await testConnectionOnStartup();
@@ -55,8 +58,6 @@ async function testConnectionOnStartup() {
         
         if (result && result.success) {
             console.log('GAS connection test successful');
-            // Don't show toast on successful connection - it can be annoying
-            // UIUtils.showToast('Connected to Google Apps Script!', 'success');
         } else {
             console.warn('GAS connection test failed:', result ? result.message : 'Unknown error');
             UIUtils.showToast('Connection issue: ' + (result ? result.message : 'Unknown error'), 'warning');
@@ -76,7 +77,6 @@ function setupEventListeners() {
         searchInput.addEventListener('input', debounce(handleSearchInput, 300));
         
         searchInput.addEventListener('blur', function(e) {
-            // Don't hide if clicking on autocomplete
             setTimeout(() => {
                 const dd = document.getElementById('autocompleteDropdown');
                 if (dd && !dd.matches(':hover')) {
@@ -85,7 +85,6 @@ function setupEventListeners() {
             }, 200);
         });
         
-        // Enter key support
         searchInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
@@ -94,14 +93,12 @@ function setupEventListeners() {
         });
     }
 
-    // Search type change
     const radios = document.getElementsByName('searchType');
     for (let radio of radios) {
         radio.addEventListener('change', function() {
             const dd = document.getElementById('autocompleteDropdown');
             if (dd) dd.classList.add('autocomplete-hidden');
             updateSearchPlaceholder();
-            // Clear search input when switching types
             const searchInput = document.getElementById('searchInput');
             if (searchInput) {
                 searchInput.value = '';
@@ -155,7 +152,6 @@ async function search() {
         return;
     }
     
-    // Hide autocomplete dropdown
     const dd = document.getElementById('autocompleteDropdown');
     if (dd) dd.classList.add('autocomplete-hidden');
     
@@ -246,8 +242,8 @@ async function handleSearchInput() {
         
         const results = await gasClient.autocompleteNames(value);
         
-        // SAFETY: Ensure results is always an array
-        if (!results || !Array.isArray(results)) {
+        // autocompleteNames already returns an array, but double-check
+        if (!Array.isArray(results)) {
             console.warn('Autocomplete results is not an array:', results);
             autocompleteResults = [];
             if (dropdown) dropdown.classList.add('autocomplete-hidden');
@@ -270,7 +266,6 @@ async function handleSearchInput() {
             displayResults.forEach((item, idx) => {
                 const div = document.createElement('div');
                 div.className = 'autocomplete-item';
-                // Highlight matching text
                 const name = item.accountName || '(no name)';
                 const lowerName = name.toLowerCase();
                 const lowerValue = value.toLowerCase();
@@ -282,7 +277,6 @@ async function handleSearchInput() {
                 } else {
                     div.textContent = name;
                 }
-                // Add account number as subtitle
                 if (item.accountNumber) {
                     const subtitle = document.createElement('span');
                     subtitle.style.cssText = 'display:block;font-size:0.7em;color:#666;';
@@ -307,7 +301,6 @@ async function handleSearchInput() {
 
 // Select autocomplete item
 function selectAutocomplete(idx) {
-    // SAFETY: Check if autocompleteResults is an array and has the index
     if (!Array.isArray(autocompleteResults) || idx >= autocompleteResults.length) {
         console.warn('Invalid autocomplete selection:', idx, autocompleteResults);
         return;
@@ -354,7 +347,6 @@ function openCustomerStatementModal(data) {
 
 // Load modal HTML
 function loadCustomerStatementModal(data) {
-    // Use inline modal HTML
     const modalHTML = `
     <div id="customerStatementModal" class="modal-overlay" style="display:none;">
       <div class="modal-content">
@@ -402,7 +394,6 @@ function loadCustomerStatementModal(data) {
     
     document.getElementById('modalContainer').innerHTML = modalHTML;
     
-    // Set default dates
     setTimeout(() => {
         const today = new Date().toISOString().split('T')[0];
         const firstDay = new Date();
@@ -450,7 +441,6 @@ function fillAndShowCustomerStatementModal(data) {
     if (modalName) modalName.innerText = name || 'N/A';
     if (modalNumber) modalNumber.value = number || '';
     
-    // Clear table
     const tbody = document.getElementById('statementTableBody');
     if (tbody) tbody.innerHTML = '';
     
@@ -593,7 +583,7 @@ function displayStatementResults(transactions) {
             tbody.appendChild(row);
         });
 
-        // Add TOTAL row if there are transactions
+        // Add TOTAL row
         if (transactions.length > 0) {
             const totalRow = document.createElement('tr');
             totalRow.className = 'total-row';
