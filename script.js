@@ -24,18 +24,18 @@ async function initApp() {
         
         if (!apiService) {
             console.error('Failed to initialize API service');
-            UIUtils.showToast('Please check GAS configuration in config.js', 'error');
+            UIUtils.showToast('⚠️ GAS configuration error - check config.js', 'error');
             return;
         }
         
         console.log('API service initialized successfully');
         
-        // Test connection
-        await testConnectionOnStartup();
-        
         // Setup UI
         setupEventListeners();
         updateSearchPlaceholder();
+        
+        // Test connection
+        testConnectionOnStartup();
         
     } catch (error) {
         console.error('App initialization failed:', error);
@@ -43,26 +43,23 @@ async function initApp() {
     }
 }
 
-// Test connection on startup
+// Test connection on startup (non-blocking)
 async function testConnectionOnStartup() {
     if (!apiService) return;
     
     try {
-        UIUtils.showLoading('Testing connection...');
         const result = await apiService.testConnection();
         
         if (result.connected) {
-            console.log('Connection test successful');
-            UIUtils.showToast('Connected to Google Apps Script!', 'success');
+            console.log('✓ Connection test successful');
+            UIUtils.showToast('✓ Connected to Google Apps Script', 'success');
         } else {
-            console.warn('Connection test failed:', result.message);
-            UIUtils.showToast(`Connection issue: ${result.message}`, 'warning');
+            console.warn('⚠ Connection test failed:', result.message);
+            UIUtils.showToast(`⚠️ ${result.message}`, 'warning');
         }
     } catch (error) {
         console.error('Connection test error:', error);
-        UIUtils.showToast('Could not connect to server', 'error');
-    } finally {
-        UIUtils.hideLoading();
+        UIUtils.showToast('⚠️ Connection error - Check GAS deployment settings', 'error');
     }
 }
 
@@ -155,7 +152,7 @@ async function search() {
         
         displayCustomer(result);
         currentCustomer = result;
-        UIUtils.showToast('Customer found successfully!', 'success');
+        UIUtils.showToast('✓ Customer found successfully!', 'success');
     } catch (error) {
         console.error('Search error:', error);
         
@@ -165,7 +162,9 @@ async function search() {
         } else if (error.code === 'INVALID_PARAMS') {
             UIUtils.showToast(`Invalid search: ${error.message}`, 'warning');
         } else if (error.code === 'CORS_ERROR') {
-            UIUtils.showToast('CORS Error: Ensure GAS deployment is set to "Anyone" access', 'error');
+            UIUtils.showToast('⚠️ CORS Error: GAS deployment settings need adjustment', 'error');
+        } else if (error.code === 'UNAUTHORIZED') {
+            UIUtils.showToast('⚠️ Unauthorized: Check GAS deployment permissions', 'error');
         } else {
             UIUtils.showToast(`Search failed: ${error.message}`, 'error');
         }
@@ -253,7 +252,7 @@ function selectAutocomplete(idx) {
     if (dd) dd.classList.add('autocomplete-hidden');
     displayCustomer(selected);
     currentCustomer = selected;
-    UIUtils.showToast('Customer selected from suggestions', 'success');
+    UIUtils.showToast('✓ Customer selected from suggestions', 'success');
 }
 
 // Open statement modal
@@ -428,14 +427,16 @@ async function generateStatement() {
         const results = await apiService.generateStatement(accountNumber, dateFrom, dateTo);
         
         displayStatementResults(results);
-        UIUtils.showToast('Statement generated successfully!', 'success');
+        UIUtils.showToast('✓ Statement generated successfully!', 'success');
     } catch (error) {
         console.error('Statement Error:', error);
         
         if (error.code === 'TIMEOUT') {
             UIUtils.showToast('Statement generation took too long. Please try again.', 'error');
         } else if (error.code === 'CORS_ERROR') {
-            UIUtils.showToast('CORS Error: Ensure GAS deployment is set to "Anyone" access', 'error');
+            UIUtils.showToast('⚠️ CORS Error: GAS deployment needs configuration', 'error');
+        } else if (error.code === 'UNAUTHORIZED') {
+            UIUtils.showToast('⚠️ Unauthorized: Check GAS deployment permissions', 'error');
         } else {
             handleStatementError(error);
             UIUtils.showToast(`Statement generation failed: ${error.message}`, 'error');
@@ -568,12 +569,12 @@ async function testConnection() {
         const result = await apiService.testConnection();
         
         if (result.connected) {
-            UIUtils.showToast('Connection successful! ' + result.message, 'success');
+            UIUtils.showToast('✓ Connection successful! ' + result.message, 'success');
         } else {
-            UIUtils.showToast('Connection failed: ' + result.message, 'error');
+            UIUtils.showToast('✗ Connection failed: ' + result.message, 'error');
         }
     } catch (error) {
-        UIUtils.showToast('Connection error: ' + error.message, 'error');
+        UIUtils.showToast('✗ Connection error: ' + error.message, 'error');
     } finally {
         UIUtils.hideLoading();
     }
